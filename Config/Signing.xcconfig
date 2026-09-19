@@ -1,0 +1,10 @@
+// Signing settings shared by all configurations.
+//
+// Your Apple Developer Team ID is personal, so it lives in Local.xcconfig,
+// which is gitignored. To set it up:
+//   cp Config/Local.xcconfig.example Config/Local.xcconfig
+// then put your Team ID in Config/Local.xcconfig.
+
+DEVELOPMENT_TEAM =
+
+#include? "Local.xcconfig"
