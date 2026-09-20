@@ -73,3 +73,9 @@ DerivedData/
 
 # Personal signing settings (see Config/Local.xcconfig.example)
 Config/Local.xcconfig
+
+# Local design mockups, not part of the app source
+Form UI mockups pending/
+docs/
+MyCMS.xcodeproj/
+AGENTS.md

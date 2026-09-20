@@ -11,7 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build
+      - name: Resolve package dependencies
+        run: |
+          xcodebuild \
+            -project MyCMS.xcodeproj \
+            -resolvePackageDependencies
+
+      - name: Build and test
         run: |
           xcodebuild \
             -project MyCMS.xcodeproj \
@@ -19,4 +25,4 @@ jobs:
             -configuration Debug \
             -destination 'platform=macOS' \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            test
