@@ -37,6 +37,8 @@ nonisolated struct Document: DatabaseRecord, Identifiable, Equatable {
     var state: State
     var publishedSlug: String?
     var publishedHash: String?
+    // Set only when you chose to keep the app's version over a file someone edited outside it.
+    var acknowledgedHash: String?
     var publishedAt: Date?
     var createdAt: Date
     var updatedAt: Date
@@ -48,7 +50,8 @@ nonisolated struct Document: DatabaseRecord, Identifiable, Equatable {
         case id, collection, slug, title, description, bodyMd, tags, featured
         case publishDate, updatedDate, cover, coverAlt
         case fields = "fieldsJson"
-        case state, publishedSlug, publishedHash, publishedAt, createdAt, updatedAt, isModified
+        case state, publishedSlug, publishedHash, acknowledgedHash, publishedAt, createdAt, updatedAt
+        case isModified
     }
 
     init(
@@ -68,6 +71,7 @@ nonisolated struct Document: DatabaseRecord, Identifiable, Equatable {
         state: State = .draft,
         publishedSlug: String? = nil,
         publishedHash: String? = nil,
+        acknowledgedHash: String? = nil,
         publishedAt: Date? = nil,
         createdAt: Date,
         updatedAt: Date,
@@ -89,6 +93,7 @@ nonisolated struct Document: DatabaseRecord, Identifiable, Equatable {
         self.state = state
         self.publishedSlug = publishedSlug
         self.publishedHash = publishedHash
+        self.acknowledgedHash = acknowledgedHash
         self.publishedAt = publishedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -114,6 +119,7 @@ nonisolated struct Document: DatabaseRecord, Identifiable, Equatable {
         container["state"] = state.rawValue
         container["published_slug"] = publishedSlug
         container["published_hash"] = publishedHash
+        container["acknowledged_hash"] = acknowledgedHash
         container["published_at"] = publishedAt
         container["created_at"] = createdAt
         container["updated_at"] = updatedAt
@@ -128,6 +134,10 @@ nonisolated struct DocumentFields: Codable, Equatable, Sendable {
         case archived
     }
 
+    // Frontmatter the app never filters or sorts on, but must write back exactly as it found it.
+    var draft: Bool?
+    var aiAssisted: Bool?
+
     var canonicalUrl: URL?
     var role: String?
     var timeline: String?
@@ -139,6 +149,8 @@ nonisolated struct DocumentFields: Codable, Equatable, Sendable {
     var order: Int?
 
     init(
+        draft: Bool? = nil,
+        aiAssisted: Bool? = nil,
         canonicalUrl: URL? = nil,
         role: String? = nil,
         timeline: String? = nil,
@@ -149,6 +161,8 @@ nonisolated struct DocumentFields: Codable, Equatable, Sendable {
         liveUrl: URL? = nil,
         order: Int? = nil
     ) {
+        self.draft = draft
+        self.aiAssisted = aiAssisted
         self.canonicalUrl = canonicalUrl
         self.role = role
         self.timeline = timeline
@@ -178,5 +192,22 @@ nonisolated struct DocumentListItem: DatabaseRow, Identifiable, Equatable {
         documents.id, documents.collection, documents.slug, documents.title, \
         documents.description, documents.tags, documents.state, \
         documents.is_modified, documents.updated_at
+        """
+}
+
+
+// The narrow row the repo scan reads, so no body is ever loaded to compare a hash.
+nonisolated struct DocumentFileRef: DatabaseRow, Identifiable, Equatable, Sendable {
+    var id: UUID
+    var collection: Document.Collection
+    var slug: String?
+    var state: Document.State
+    var publishedSlug: String?
+    var publishedHash: String?
+    var acknowledgedHash: String?
+
+    static let selection = """
+        documents.id, documents.collection, documents.slug, documents.state, \
+        documents.published_slug, documents.published_hash, documents.acknowledged_hash
         """
 }

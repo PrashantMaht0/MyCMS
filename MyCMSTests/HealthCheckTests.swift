@@ -51,10 +51,10 @@ struct GitClientTests {
     @Test("Surfaces a launch failure when the binary is missing")
     func surfacesLaunchFailure() async {
         let client = GitClient { path, _, _ in
-            throw GitError.launchFailed(path: path, underlying: CocoaError(.fileNoSuchFile))
+            throw PublishError.launchFailed(path: path, underlying: CocoaError(.fileNoSuchFile))
         }
 
-        await #expect(throws: GitError.self) {
+        await #expect(throws: PublishError.self) {
             try await client.version()
         }
     }
@@ -68,7 +68,7 @@ struct GitClientTests {
         do {
             _ = try await client.version()
             Issue.record("Expected the check to throw")
-        } catch let error as GitError {
+        } catch let error as PublishError {
             #expect(error.errorDescription == "fatal: not a git repository")
         }
     }
@@ -82,7 +82,7 @@ struct GitClientTests {
         do {
             _ = try await client.version()
             Issue.record("Expected the check to throw")
-        } catch let error as GitError {
+        } catch let error as PublishError {
             #expect(error.errorDescription?.contains("5 seconds") == true)
         }
     }

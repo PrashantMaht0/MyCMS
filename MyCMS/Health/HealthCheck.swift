@@ -8,12 +8,14 @@ import OSLog
     private let database: Database
     private let git: GitClient
     private let ollama: OllamaClient
+    private let repository: RepositoryService?
     private var hasRun = false
 
-    init(database: Database, git: GitClient, ollama: OllamaClient) {
+    init(database: Database, git: GitClient, ollama: OllamaClient, repository: RepositoryService? = nil) {
         self.database = database
         self.git = git
         self.ollama = ollama
+        self.repository = repository
     }
 
     // Runs once per launch. A SwiftUI task can re-fire, and each re-fire would spawn real work.
@@ -51,6 +53,29 @@ import OSLog
     private func apply(_ result: CheckResult) {
         guard let index = results.firstIndex(where: { $0.name == result.name }) else { return }
         results[index] = result
+        record(result)
+    }
+
+    // The status bar reads this row rather than rerunning a check to draw itself. Only Ollama is
+    // written here: the git row holds the last proof that a push would work, which is a network
+    // call setup makes deliberately, and a launch must not overwrite it with something weaker.
+    private func record(_ result: CheckResult) {
+        guard let repository, result.name == .ollama else { return }
+
+        let outcome: CheckOutcome
+        switch result.state {
+        case .ok: outcome = .ok(result.detail)
+        case .failed: outcome = .failed(result.errorText ?? result.detail)
+        case .skipped: outcome = .skipped(result.detail)
+        case .pending: return
+        }
+
+        // A good row setup wrote names the version and the model. A launch that merely reached Ollama
+        // must not replace it with its thinner line; only a change of outcome is worth recording.
+        if outcome.outcome == .ok, (try? repository.setupState().ollama?.outcome) == .ok { return }
+
+        // A launch check is never worth failing a launch over, so a write that fails is dropped.
+        try? repository.record(outcome, forKey: SettingsKey.checkOllama)
     }
 
     // The open runs here rather than in AppEnvironment.init, so the window appears immediately.

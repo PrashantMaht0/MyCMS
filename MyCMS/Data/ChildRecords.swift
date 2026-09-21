@@ -37,6 +37,8 @@ nonisolated struct Asset: DatabaseRecord, Identifiable, Equatable {
     var sha256: String
     var alt: String
     var createdAt: Date
+    var width: Int?
+    var height: Int?
 
     func encode(to container: inout PersistenceContainer) throws {
         container["id"] = id
@@ -46,6 +48,8 @@ nonisolated struct Asset: DatabaseRecord, Identifiable, Equatable {
         container["sha256"] = sha256
         container["alt"] = alt
         container["created_at"] = createdAt
+        container["width"] = width
+        container["height"] = height
     }
 }
 
@@ -64,6 +68,7 @@ nonisolated struct AISuggestion: DatabaseRecord, Identifiable, Equatable {
     var latencyMs: Int
     var outcome: String
     var createdAt: Date
+    var targetHash: String?
 
     func encode(to container: inout PersistenceContainer) throws {
         container["id"] = id
@@ -77,6 +82,7 @@ nonisolated struct AISuggestion: DatabaseRecord, Identifiable, Equatable {
         container["latency_ms"] = latencyMs
         container["outcome"] = outcome
         container["created_at"] = createdAt
+        container["target_hash"] = targetHash
     }
 }
 

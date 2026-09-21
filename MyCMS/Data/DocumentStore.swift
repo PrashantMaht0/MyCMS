@@ -27,6 +27,15 @@ nonisolated struct DocumentStore: Sendable {
         return document
     }
 
+    // The import extension in ImportPlan.swift runs its own SQL, so it reaches the connection here.
+    func read<T>(_ block: (GRDB.Database) throws -> T) throws -> T {
+        try database.read(block)
+    }
+
+    func write<T>(_ block: (GRDB.Database) throws -> T) throws -> T {
+        try database.write(block)
+    }
+
     func fetch(id: UUID) throws -> Document? {
         try database.read { db in
             try Document.filter(Column("id") == id.uuidString).fetchOne(db)
@@ -67,6 +76,25 @@ nonisolated struct DocumentStore: Sendable {
                 throw DataError.slugTaken
             }
             guard updated > 0 else { throw DataError.notFound }
+        }
+    }
+
+    // Resolves a slug to one that is free in this collection, so the caller never writes a
+    // slug the database would reject. A rejected slug would take the whole update down with it.
+    func claimSlug(_ base: String?, for id: UUID, in collection: Document.Collection) throws -> String? {
+        guard let base else { return nil }
+
+        return try database.read { db in
+            for attempt in 1...100 {
+                let candidate = SlugRule.candidate(base, attempt: attempt)
+                let taken = try Document
+                    .filter(Column("collection") == collection.rawValue)
+                    .filter(Column("slug") == candidate)
+                    .filter(Column("id") != id.uuidString)
+                    .fetchCount(db) > 0
+                if !taken { return candidate }
+            }
+            return "\(base)-\(UUID().uuidString.prefix(8).lowercased())"
         }
     }
 

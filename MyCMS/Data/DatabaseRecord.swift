@@ -19,7 +19,15 @@ nonisolated extension DatabaseRow {
 // The JSON columns are written by hand, so both sides use one encoder and one decoder.
 nonisolated enum DatabaseJSON {
     static func encode(_ value: some Encodable) throws -> String {
-        let data = try JSONEncoder().encode(value)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(value)
         return String(decoding: data, as: UTF8.self)
+    }
+
+    static func decode<T: Decodable>(_ type: T.Type, from text: String) throws -> T {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(type, from: Data(text.utf8))
     }
 }

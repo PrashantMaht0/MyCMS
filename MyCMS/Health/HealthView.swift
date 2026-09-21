@@ -5,19 +5,6 @@ struct HealthView: View {
     @Environment(AppEnvironment.self) private var environment
 
     var body: some View {
-        Group {
-            if let failure = environment.health.databaseFailure {
-                DatabaseFailureView(result: failure)
-            } else {
-                report
-            }
-        }
-        .task {
-            await environment.health.runOnce()
-        }
-    }
-
-    private var report: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("MyCMS")
@@ -35,11 +22,6 @@ struct HealthView: View {
                 }
             }
             .background(.quaternary.opacity(0.4), in: .rect(cornerRadius: 10))
-
-            // Scaffold, removed with DataThreadView once features 4 and 5 land.
-            if environment.health.results.first(where: { $0.name == .database })?.state == .ok {
-                DataThreadView()
-            }
 
             Spacer()
         }
@@ -66,7 +48,7 @@ private struct CheckRow: View {
                 if let errorText = result.errorText {
                     Text(errorText)
                         .font(.callout)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(result.name.isFatal ? .red : .secondary)
                         .textSelection(.enabled)
                 }
             }
@@ -83,7 +65,11 @@ private struct CheckRow: View {
         case .ok:
             Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
         case .failed:
-            Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
+            // Only the database is fatal, so the other two never wear the blocking symbol.
+            Image(systemName: result.name.isFatal ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(result.name.isFatal ? .red : .orange)
+        case .skipped:
+            Image(systemName: "minus.circle").foregroundStyle(.secondary)
         }
     }
 }

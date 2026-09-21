@@ -6,6 +6,10 @@ nonisolated enum Migrations {
     static var migrator: DatabaseMigrator {
         var migrator = DatabaseMigrator()
         migrator.registerMigration("v1", migrate: createSchema)
+        migrator.registerMigration("v2", migrate: addAcknowledgedHash)
+        migrator.registerMigration("v3", migrate: addAssetSize)
+        migrator.registerMigration("v4", migrate: addSuggestionTargetHash)
+        migrator.registerMigration("v5", migrate: indexRevisionsByTime)
         return migrator
     }
 
@@ -14,6 +18,40 @@ nonisolated enum Migrations {
         try createChildTables(db)
         try createSettings(db)
         try createSearchIndex(db)
+    }
+
+    // Feature 20. The foreign hash you chose to keep the app's version over, so a divergence you
+    // already answered stops showing a badge until the file changes again.
+    private static func addAcknowledgedHash(_ db: GRDB.Database) throws {
+        try db.alter(table: "documents") { t in
+            t.add(column: "acknowledged_hash", .text)
+        }
+    }
+
+    // Spec 0005 A. The stored image's size after the cap, so the editor can reserve its space
+    // before decoding the file, which is what stops the text jumping as pictures load.
+    private static func addAssetSize(_ db: GRDB.Database) throws {
+        try db.alter(table: "assets") { t in
+            t.add(column: "width", .integer)
+            t.add(column: "height", .integer)
+        }
+    }
+
+    // Spec 0005 B. The paragraph a suggestion was made against, which keys both the cache and the
+    // dismissal memory, indexed because the dismissal lookup runs on every check.
+    private static func addSuggestionTargetHash(_ db: GRDB.Database) throws {
+        try db.alter(table: "ai_suggestions") { t in
+            t.add(column: "target_hash", .text)
+        }
+        try db.create(
+            index: "ai_suggestions_on_document_target_outcome",
+            on: "ai_suggestions",
+            columns: ["document_id", "target_hash", "outcome"])
+    }
+
+    // Spec 0005 D. The history panel always reads one document newest first.
+    private static func indexRevisionsByTime(_ db: GRDB.Database) throws {
+        try db.create(index: "revisions_on_document_created_at", on: "revisions", columns: ["document_id", "created_at"])
     }
 
     private static func createDocuments(_ db: GRDB.Database) throws {
