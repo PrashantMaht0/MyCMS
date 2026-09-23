@@ -1,9 +1,12 @@
 import Foundation
 import GRDB
 
-// Spec 0005 B. Every suggestion's terminal state, the dismissal memory, and the cache, all in
-// ai_suggestions, keyed on the exact paragraph text through target_hash.
+/// Every AI suggestion's final state, the dismissal memory, and the "already checked" cache.
+///
+/// All three live in `ai_suggestions`, keyed on the exact paragraph text through `target_hash`, so
+/// editing a paragraph makes its old verdicts stop applying without deleting anything.
 nonisolated struct SuggestionStore: Sendable {
+    // Where a suggestion ended up, which is also the dismissal memory.
     enum Outcome: String, Sendable {
         case shown, accepted, dismissed, stale, dropped
     }
@@ -25,7 +28,8 @@ nonisolated struct SuggestionStore: Sendable {
     // A shown suggestion moves on to its final state rather than gaining a second row.
     func resolve(id: Int64, as outcome: Outcome) throws {
         try database.write { db in
-            try db.execute(sql: "UPDATE ai_suggestions SET outcome = ? WHERE id = ?", arguments: [outcome.rawValue, id])
+            try db.execute(
+                sql: "UPDATE ai_suggestions SET outcome = ? WHERE id = ?", arguments: [outcome.rawValue, id])
         }
     }
 

@@ -1,7 +1,9 @@
 import Foundation
 
-// What one file on disk turned out to be, relative to what the database already knows.
+/// What the scan concluded about one file: where it is, its hash, which document it matched, and the
+/// verdict the import acts on.
 nonisolated struct ScanFinding: Sendable, Identifiable {
+    // What the scan concluded about one file, and what the import does with it.
     enum Verdict: Sendable, Equatable {
         case new
         case unchanged
@@ -23,8 +25,12 @@ nonisolated struct ScanFinding: Sendable, Identifiable {
     var id: String { relativePath }
 }
 
-// Walks the two content folders and compares every file to what the database holds.
-// Reads only. Nothing in this type writes to the repo or to the database.
+/// Walks the two content folders and compares every file to what the database holds.
+///
+/// Reads only: nothing here writes to the repo or the database. Matches a file to a document by
+/// `cmsId` first and by slug second, and reports one `ScanFinding` per file: new, unchanged,
+/// changed outside the app, or skipped with a reason. A published document whose file has gone is
+/// reported too.
 nonisolated struct ContentScanner: Sendable {
     func scan(repo: URL, known: [DocumentFileRef]) -> [ScanFinding] {
         // Only a published document is ever a match target. A draft holding the same slug is a
@@ -72,7 +78,8 @@ nonisolated struct ContentScanner: Sendable {
                 }
                 if let cmsId = file.frontmatter.cmsId { claimedIds.insert(cmsId) }
 
-                let match = file.frontmatter.cmsId.flatMap { byId[$0] }
+                let match =
+                    file.frontmatter.cmsId.flatMap { byId[$0] }
                     ?? bySlug["\(collection.rawValue)/\(slug)"]
                 if let match { seenRefIds.insert(match.id) }
 
@@ -109,9 +116,11 @@ nonisolated struct ContentScanner: Sendable {
     }
 
     private func markdownFiles(in folder: URL) -> [URL] {
-        let contents = (try? FileManager.default.contentsOfDirectory(
-            at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
-        return contents
+        let contents =
+            (try? FileManager.default.contentsOfDirectory(
+                at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+        return
+            contents
             .filter { $0.pathExtension.lowercased() == "md" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }

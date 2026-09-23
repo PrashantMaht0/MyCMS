@@ -2,9 +2,15 @@ import Foundation
 import GRDB
 import OSLog
 
-// The open document. This is the only source of truth for its text while the editor is up.
-// The library's observation never writes back into it, which is what stops a save moving the caret.
+/// The open document, and the only source of truth for its text while the editor is up.
+///
+/// Every edit marks a field dirty and schedules an autosave one second later; `flush` is awaited
+/// before leaving so nothing is lost. The library's observation never writes back into it, which is
+/// what stops a save moving the caret. It also owns the rules that ride along with a save: a title
+/// change moves the slug only while a document has never been published, and moving a slug rewrites
+/// the picture paths in the same write.
 @MainActor @Observable final class DocumentSession {
+    // What the save pill shows. A failure keeps its attempt count so Retry can settle it.
     enum SaveState: Equatable {
         case clean
         case dirty
@@ -26,13 +32,29 @@ import OSLog
     var body: String { didSet { if !isApplyingOwnEdit { markDirty(.body, from: oldValue, to: body) } } }
     var title: String { didSet { markDirty(.title, from: oldValue, to: title) } }
     var subtitle: String { didSet { markDirty(.subtitle, from: oldValue, to: subtitle) } }
-    var tags: [String] { didSet { if tags != oldValue { dirtyFields.insert(.tags); scheduleSave() } } }
+    var tags: [String] {
+        didSet {
+            if tags != oldValue {
+                dirtyFields.insert(.tags)
+                scheduleSave()
+            }
+        }
+    }
+    // Spec 0006 B, AC-12. The project fields, saved into fields_json by the same autosave.
+    var fields: DocumentFields {
+        didSet {
+            if fields != oldValue, !isApplyingOwnEdit {
+                dirtyFields.insert(.fields)
+                scheduleSave()
+            }
+        }
+    }
 
     // AC-66. The cover is a Markdown path like an inline image, and its alt text travels with it.
     private(set) var cover: String?
     private(set) var coverAlt: String
 
-    private enum Field: Hashable { case body, title, subtitle, tags, cover }
+    private enum Field: Hashable { case body, title, subtitle, tags, cover, fields }
 
     private let store: DocumentStore
     private let assets: AssetStore?
@@ -41,7 +63,6 @@ import OSLog
     private var isApplyingOwnEdit = false
     private let autosaveDelay: Duration
     private var dirtyFields: Set<Field> = []
-    private var changedParagraphIDs: Set<Int> = []
     private var saveTask: Task<Void, Never>?
 
     init(
@@ -57,6 +78,7 @@ import OSLog
         self.title = document.title
         self.subtitle = document.description
         self.tags = document.tags
+        self.fields = document.fields
         self.cover = document.cover
         self.coverAlt = document.coverAlt
     }
@@ -74,12 +96,6 @@ import OSLog
     // Split on blank lines, Markdown's own paragraph rule, but never inside a fenced code block.
     var paragraphs: [Paragraph] {
         Self.split(body)
-    }
-
-    // Destructive on read, so feature 9 only ever sees what moved since it last looked.
-    func changedParagraphs() -> Set<Int> {
-        defer { changedParagraphIDs.removeAll() }
-        return changedParagraphIDs
     }
 
     nonisolated static func split(_ text: String) -> [Paragraph] {
@@ -173,15 +189,7 @@ import OSLog
     private func markDirty(_ field: Field, from old: String, to new: String) {
         guard old != new else { return }
         dirtyFields.insert(field)
-        if field == .body { recordChangedParagraphs(old: old, new: new) }
         scheduleSave()
-    }
-
-    private func recordChangedParagraphs(old: String, new: String) {
-        let before = Set(Self.split(old).map(\.id))
-        for paragraph in Self.split(new) where !before.contains(paragraph.id) {
-            changedParagraphIDs.insert(paragraph.id)
-        }
     }
 
     private func scheduleSave() {
@@ -226,6 +234,9 @@ import OSLog
         var assignments: [ColumnAssignment] = []
         if fields.contains(.subtitle) { assignments.append(Column("description").set(to: subtitle)) }
         if fields.contains(.tags) { assignments.append(Column("tags").set(to: Self.encodeTags(tags))) }
+        if fields.contains(.fields) {
+            assignments.append(Column("fields_json").set(to: (try? DatabaseJSON.encode(self.fields)) ?? "{}"))
+        }
         if fields.contains(.cover) {
             assignments.append(Column("cover").set(to: cover))
             assignments.append(Column("cover_alt").set(to: coverAlt))
@@ -236,18 +247,22 @@ import OSLog
         var rewrittenCover: String?
         if fields.contains(.title) {
             assignments.append(Column("title").set(to: title))
-            // The slug rides along only when the title actually moved, and only while a draft.
-            if document.state == .draft {
-                let claimed = (try? store.claimSlug(SlugRule.derive(from: title), for: document.id, in: document.collection)) ?? nil
+            // Spec 0006 A, AC-5. Only a never published draft follows its title; Change address moves the rest.
+            if document.publishedSlug == nil {
+                let claimed =
+                    (try? store.claimSlug(SlugRule.derive(from: title), for: document.id, in: document.collection))
+                    ?? nil
                 assignments.append(Column("slug").set(to: claimed))
                 newSlug = claimed
 
                 // AC-11. Image paths carry the slug, so they move in the same write as it does.
                 if let old = document.slug, let claimed, old != claimed {
-                    let movedBody = AssetStore.rewriteReferences(in: body, from: old, to: claimed, collection: document.collection)
+                    let movedBody = AssetStore.rewriteReferences(
+                        in: body, from: old, to: claimed, collection: document.collection)
                     if movedBody != body { rewrittenBody = movedBody }
                     if let cover {
-                        let movedCover = AssetStore.movedPath(cover, from: old, to: claimed, collection: document.collection)
+                        let movedCover = AssetStore.movedPath(
+                            cover, from: old, to: claimed, collection: document.collection)
                         if movedCover != cover {
                             rewrittenCover = movedCover
                             assignments.append(Column("cover").set(to: rewrittenCover))
@@ -261,7 +276,7 @@ import OSLog
             assignments.append(Column("body_md").set(to: rewrittenBody ?? body))
             // AC-49. The stored body from before this change, at most once per ten minutes.
             if document.bodyMd != (rewrittenBody ?? body) {
-                try? revisions?.snapshot(document, body: document.bodyMd, reason: .autosave)
+                _ = try? revisions?.snapshot(document, body: document.bodyMd, reason: .autosave)
             }
         }
 
@@ -282,6 +297,7 @@ import OSLog
             document.title = title
             document.description = subtitle
             document.tags = tags
+            document.fields = self.fields
             saveState = dirtyFields.isEmpty ? .clean : .dirty
         } catch let error as DataError {
             if case .notFound = error {
@@ -297,25 +313,44 @@ import OSLog
     // AC-52 and AC-54. The text you are leaving is kept first, then the old version goes in like any
     // edit: autosaved, counted, and itself restorable later.
     func restore(_ revision: Revision) {
-        try? revisions?.snapshot(document, body: body, reason: .manual)
+        _ = try? revisions?.snapshot(document, body: body, reason: .manual)
         body = revision.bodyMd
     }
 
     // AC-32. Notes open question 3: true once, and only once, an AI rewrite has been accepted.
     func markAIAssisted() {
-        guard document.fields.aiAssisted != true else { return }
-        var fields = document.fields
-        fields.aiAssisted = true
-        guard let encoded = try? DatabaseJSON.encode(fields),
+        guard fields.aiAssisted != true else { return }
+        var marked = fields
+        marked.aiAssisted = true
+        guard let encoded = try? DatabaseJSON.encode(marked),
             (try? store.update(id: document.id, Column("fields_json").set(to: encoded))) != nil
         else { return }
-        document.fields = fields
+        document.fields.aiAssisted = true
+        isApplyingOwnEdit = true
+        fields.aiAssisted = true
+        isApplyingOwnEdit = false
     }
 
     // After a publish the row has moved on (state, slug lock, dates), so the session takes it up.
     func reloadFromStore() {
         guard let fresh = try? store.fetch(id: document.id) else { return }
         document = fresh
+        // The Publish sheet writes featured and the canonical URL, so fields follow unless you edited them.
+        guard !dirtyFields.contains(.fields) else { return }
+        isApplyingOwnEdit = true
+        fields = fresh.fields
+        isApplyingOwnEdit = false
+    }
+
+    // Spec 0006 A, AC-9. The publisher already stored the moved slug, body and cover in the commit's
+    // transaction; this takes them into the open editor so a later save cannot write the old paths back.
+    func adoptPublishedAddress(_ slug: String) {
+        guard let old = document.slug, old != slug else { return reloadFromStore() }
+        isApplyingOwnEdit = true
+        body = AssetStore.rewriteReferences(in: body, from: old, to: slug, collection: document.collection)
+        isApplyingOwnEdit = false
+        if let cover { self.cover = AssetStore.movedPath(cover, from: old, to: slug, collection: document.collection) }
+        reloadFromStore()
     }
 
     // The Retry control on the save pill. Clears the failure count so the pill can settle again.

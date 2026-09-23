@@ -7,6 +7,7 @@ nonisolated struct StyledRun: Sendable, Equatable {
     var style: MarkdownStyle
 }
 
+// Every way a stretch of Markdown can be drawn. The values carry what the drawing needs.
 nonisolated enum MarkdownStyle: Sendable, Equatable {
     case heading(level: Int)
     case blockQuote

@@ -17,7 +17,10 @@ struct HistoryPanel: View {
                 Text("No versions yet. One is kept as you edit, at most every ten minutes, and on every publish.")
                     .foregroundStyle(Broadsheet.Colors.secondaryText)
             } else {
-                List(list, selection: Binding(get: { selected?.id }, set: { id in selected = list.first { $0.id == id } })) { revision in
+                List(
+                    list,
+                    selection: Binding(get: { selected?.id }, set: { id in selected = list.first { $0.id == id } })
+                ) { revision in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(RevisionStore.Reason(rawValue: revision.reason)?.label ?? revision.reason)
                         Text(revision.createdAt, format: .relative(presentation: .named))
@@ -74,11 +77,11 @@ private struct DiffText: View {
         runs.reduce(Text("")) { text, run in
             switch run {
             case .same(let words):
-                text + Text(words)
+                Text("\(text)\(Text(words))")
             case .inserted(let words):
-                text + Text(words).underline().foregroundStyle(.green)
+                Text("\(text)\(Text(words).underline().foregroundStyle(.green))")
             case .removed(let words):
-                text + Text(words).strikethrough().foregroundStyle(Broadsheet.Colors.accentText)
+                Text("\(text)\(Text(words).strikethrough().foregroundStyle(Broadsheet.Colors.accentText))")
             }
         }
         .font(Broadsheet.serif(Broadsheet.TypeScale.body))

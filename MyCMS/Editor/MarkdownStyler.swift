@@ -1,8 +1,12 @@
 import AppKit
 import OSLog
 
-// AC-1 to AC-5. Draws the Markdown without ever changing it: attributes only, bounded by the
-// viewport, with a fresh parse only once typing pauses.
+/// Draws the Markdown without ever changing it: attributes only, bounded by what is on screen.
+///
+/// It reparses once typing pauses, and restyles the viewport plus a margin. A scroll that stays
+/// inside what it already styled rewrites nothing, because rewriting attributes throws away the
+/// layout of the lines on screen and leaves them blank. After any write it asks TextKit to lay the
+/// viewport out again.
 final class MarkdownStyler: NSObject, NSTextStorageDelegate {
     // Short enough that a heading styles as you finish typing it, long enough that a burst of
     // keystrokes restyles the last tree rather than re parsing per character.
@@ -36,6 +40,8 @@ final class MarkdownStyler: NSObject, NSTextStorageDelegate {
     private var styleSheet: MarkdownStyleSheet
     private var parseTask: Task<Void, Never>?
     private var restyleScheduled = false
+    // What the last restyle covered, so a scroll that stays inside it rewrites nothing.
+    private var styledRange = NSRange(location: 0, length: 0)
     private var spellingSweepScheduled = false
     // Set while this object is the one editing attributes, so its own edits are not mistaken for
     // the spell checker's or for a keystroke.
@@ -64,7 +70,11 @@ final class MarkdownStyler: NSObject, NSTextStorageDelegate {
         reparse()
     }
 
+    // Rewriting attributes throws away the layout of the lines on screen, so a scroll restyles only new text.
     @objc private func viewportMoved() {
+        guard let textView, let storage = textView.textStorage else { return }
+        let window = styleWindow(textView, length: storage.length)
+        guard NSIntersectionRange(window, styledRange) != window else { return }
         scheduleRestyle()
     }
 
@@ -138,6 +148,9 @@ final class MarkdownStyler: NSObject, NSTextStorageDelegate {
         }
         storage.endEditing()
         isAdjusting = false
+        styledRange = window
+        // The write dropped the layout of the lines on screen, so TextKit lays them out again now.
+        textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
 
         textView.quoteRanges = structure.runs(in: window)
             .filter { $0.style == .blockQuote }
@@ -184,7 +197,8 @@ final class MarkdownStyler: NSObject, NSTextStorageDelegate {
 
         if let layoutManager = textView.textLayoutManager,
             let contentManager = layoutManager.textContentManager,
-            let viewport = layoutManager.textViewportLayoutController.viewportRange {
+            let viewport = layoutManager.textViewportLayoutController.viewportRange
+        {
             let origin = contentManager.documentRange.location
             start = contentManager.offset(from: origin, to: viewport.location)
             end = contentManager.offset(from: origin, to: viewport.endLocation)

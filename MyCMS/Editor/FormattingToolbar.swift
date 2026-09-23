@@ -8,6 +8,20 @@ struct FormattingToolbar: View {
     var aiEnabled: Binding<Bool>?
 
     var body: some View {
+        tools
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .trailing) { aiToggle }
+            .font(Broadsheet.serif(Broadsheet.TypeScale.uiLarge))
+            .foregroundStyle(Broadsheet.Colors.text)
+            .padding(.horizontal, Broadsheet.Space.x6)
+            .padding(.top, Broadsheet.Space.x1)
+            // Room between the tools and the rule under them.
+            .padding(.bottom, Broadsheet.Space.x3)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Formatting")
+    }
+
+    private var tools: some View {
         HStack(spacing: Broadsheet.Space.x1) {
             ToolbarButton("arrow.uturn.backward", label: "Undo", enabled: controller.canUndo) {
                 controller.undo()
@@ -37,24 +51,18 @@ struct FormattingToolbar: View {
 
             separator
             moreMenu
-
-            Spacer()
-
-            if let aiEnabled {
-                Toggle(isOn: aiEnabled) {
-                    Image(systemName: "sparkles")
-                }
-                .toggleStyle(.button)
-                .help("Grammar and punctuation suggestions")
-                .accessibilityLabel("AI suggestions")
-            }
         }
-        .font(Broadsheet.serif(Broadsheet.TypeScale.uiLarge))
-        .foregroundStyle(Broadsheet.Colors.text)
-        .padding(.horizontal, Broadsheet.Space.x4)
-        .padding(.vertical, Broadsheet.Space.x1)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Formatting")
+    }
+
+    @ViewBuilder private var aiToggle: some View {
+        if let aiEnabled {
+            Toggle(isOn: aiEnabled) {
+                Image(systemName: "sparkles")
+            }
+            .toggleStyle(.button)
+            .help("Grammar and punctuation suggestions")
+            .accessibilityLabel("AI suggestions")
+        }
     }
 
     private var separator: some View {

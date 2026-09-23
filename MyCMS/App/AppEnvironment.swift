@@ -1,6 +1,10 @@
 import Foundation
 
-// The one container every long lived service hangs off. Views read it, never build it.
+/// The one container every long lived service hangs off: the database, the stores, the publisher,
+/// git, Ollama and the setup state.
+///
+/// Views read it from the SwiftUI environment and never build a service themselves, which is what
+/// keeps one database connection and one publisher for the whole app.
 @Observable final class AppEnvironment {
     let database: Database
     let documents: DocumentStore
@@ -34,7 +38,7 @@ import Foundation
         self.git = git
         self.ollama = ollama
         self.repository = RepositoryService(git: git, settings: settings)
-        self.importer = ImportService(store: documents, settings: settings)
+        self.importer = ImportService(store: documents, settings: settings, assets: assets)
         self.health = HealthCheck(database: database, git: git, ollama: ollama, repository: repository)
         self.setup = SetupModel(repository: repository, importer: importer, store: documents)
         self.preferences = SettingsModel(

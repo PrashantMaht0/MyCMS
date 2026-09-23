@@ -1,8 +1,11 @@
 import Foundation
 import Markdown
 
-// Invariant 7. The one place swift-markdown's UTF-8 byte columns become the UTF-16 offsets
-// that NSRange and NSTextView use. Two conversions would disagree on any line holding an emoji.
+/// Turns the line and column positions the Markdown parser reports into character ranges the text
+/// view can use.
+///
+/// Built once per parse. Lines are 1 based and columns count UTF-8 bytes, as the parser reports
+/// them; everything it hands back is UTF-16, which is what AppKit speaks.
 nonisolated struct LineIndex: Sendable {
     let text: String
 
@@ -46,8 +49,6 @@ nonisolated struct LineIndex: Sendable {
 
         self.lines = built
     }
-
-    var utf16Count: Int { totalUTF16 }
 
     // Both arguments are 1 based, as cmark reports them, and the column counts UTF-8 bytes.
     func utf16Offset(line: Int, column: Int) -> Int {

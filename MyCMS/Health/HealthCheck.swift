@@ -1,7 +1,10 @@
 import Foundation
 import OSLog
 
-// Runs the three boundary checks at launch and holds their results.
+/// The three launch checks: the database opens, git runs, and Ollama answers.
+///
+/// Only the database is blocking; git and Ollama failing are reported and the app still opens. The
+/// status line reads the recorded result rather than running a check to draw itself.
 @Observable final class HealthCheck {
     private(set) var results: [CheckResult] = CheckName.allCases.map(CheckResult.pending)
 
@@ -56,9 +59,8 @@ import OSLog
         record(result)
     }
 
-    // The status bar reads this row rather than rerunning a check to draw itself. Only Ollama is
-    // written here: the git row holds the last proof that a push would work, which is a network
-    // call setup makes deliberately, and a launch must not overwrite it with something weaker.
+    // The status bar reads this row instead of rerunning a check. Only Ollama is written: the git row
+    // is setup's proof that a push works, and a launch must not overwrite it with something weaker.
     private func record(_ result: CheckResult) {
         guard let repository, result.name == .ollama else { return }
 

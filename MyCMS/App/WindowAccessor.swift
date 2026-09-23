@@ -1,10 +1,8 @@
 import AppKit
 import SwiftUI
 
-// AppKit already restores a window's size and position correctly, so this hands it the name
-// to autosave under rather than reimplementing geometry in UserDefaults.
-// The split view needs no equivalent: SwiftUI's NavigationSplitView autosaves its own column
-// widths under "SidebarNavigationSplitView", which is the same AppKit mechanism.
+// AppKit restores window geometry itself, so this only hands it a name to autosave under.
+// NavigationSplitView already autosaves its column widths through the same AppKit mechanism.
 struct WindowFrameAutosave: NSViewRepresentable {
     let name: String
 

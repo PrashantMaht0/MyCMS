@@ -1,11 +1,13 @@
 import AppKit
 import Foundation
 import Testing
+
 @testable import MyCMS
 
 @MainActor
 private func editor(_ text: String, selecting selection: NSRange? = nil)
-    -> (MarkdownEditorTextView, EditorTextController, NSWindow) {
+    -> (MarkdownEditorTextView, EditorTextController, NSWindow)
+{
     let textView = MarkdownEditorTextView(usingTextLayoutManager: true)
     textView.allowsUndo = true
     textView.string = text
@@ -191,7 +193,8 @@ struct FormattingToolbarTests {
 struct MarkdownStylerTests {
 
     private func styled(_ text: String, showMarkers: Bool = true)
-        -> (MarkdownEditorTextView, MarkdownStyler) {
+        -> (MarkdownEditorTextView, MarkdownStyler)
+    {
         let textView = MarkdownEditorTextView(usingTextLayoutManager: true)
         textView.string = text
 
@@ -202,6 +205,43 @@ struct MarkdownStylerTests {
         styler.attach(to: textView, in: scrollView)
         styler.restyle()
         return (textView, styler)
+    }
+
+    @Test("Scrolling through text already styled rewrites nothing, so the lines on screen keep their layout")
+    func scrollingDoesNotRestyle() async throws {
+        var text = ""
+        for section in 1...6 {
+            text += "## Section \(section)\n\n" + String(repeating: "Some **bold** words here. ", count: 12) + "\n\n"
+        }
+        let textView = MarkdownEditorTextView(usingTextLayoutManager: true)
+        textView.isVerticallyResizable = true
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.string = text
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 600, height: 200))
+        scrollView.documentView = textView
+        let window = NSWindow(contentRect: scrollView.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = scrollView
+        let styler = MarkdownStyler(fontSize: Broadsheet.TypeScale.body, showMarkers: true)
+        styler.attach(to: textView, in: scrollView)
+        window.displayIfNeeded()
+        try await Task.sleep(for: .milliseconds(50))
+
+        var edits = 0
+        let token = NotificationCenter.default.addObserver(
+            forName: NSTextStorage.didProcessEditingNotification, object: textView.textStorage, queue: nil
+        ) { _ in edits += 1 }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        for _ in 0..<10 {
+            let clip = scrollView.contentView
+            clip.scroll(
+                to: NSPoint(x: 0, y: min(textView.frame.height - clip.bounds.height, clip.bounds.origin.y + 60)))
+            scrollView.reflectScrolledClipView(clip)
+            window.displayIfNeeded()
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(edits == 0)
     }
 
     @Test("Styling changes how the text is drawn and never what it says, which is AC-2")

@@ -70,7 +70,7 @@ nonisolated extension DocumentStore {
                             published_hash = ?, acknowledged_hash = NULL, published_at = ?,
                             updated_at = ?
                         WHERE id = ?
-                        
+
                         """,
                     arguments: [
                         adoption.slug, adoption.title, adoption.description, adoption.bodyMd,

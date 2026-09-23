@@ -55,7 +55,9 @@ nonisolated enum AppFonts {
             if ok {
                 Loggers.app.info("Registered \(fonts.count, privacy: .public) Source Serif 4 font files")
             } else {
-                Loggers.app.error("Source Serif 4 failed to register, falling back to the system serif: \(failures.joined(separator: "; "), privacy: .public)")
+                Loggers.app.error(
+                    "Source Serif 4 failed to register, falling back to the system serif: \(failures.joined(separator: "; "), privacy: .public)"
+                )
             }
         }
     }

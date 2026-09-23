@@ -2,6 +2,7 @@ import Foundation
 
 // The last result of one launch check, kept in settings so a relaunch can show it without rerunning.
 nonisolated struct CheckOutcome: Codable, Equatable, Sendable {
+    // A recorded check result, so the status line can be drawn without rerunning the check.
     enum Outcome: String, Codable, Sendable {
         case ok
         case failed

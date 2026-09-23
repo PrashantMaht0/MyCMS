@@ -25,6 +25,7 @@ nonisolated struct Suggestion: Sendable, Identifiable, Equatable {
     let targetHash: String
 }
 
+// Kept, or dropped with the reason, which is what the dropped count in the panel adds up.
 nonisolated enum SuggestionVerdict: Sendable, Equatable {
     enum Reason: String, Sendable {
         case unknownKind = "kind is not punctuation or grammar"
@@ -40,8 +41,12 @@ nonisolated enum SuggestionVerdict: Sendable, Equatable {
     case dropped(Reason)
 }
 
-// AC-22 to AC-25 and AC-28. Nothing the model returns is an edit: each check here is deterministic,
-// and a failure is a logged drop that never reaches the screen.
+/// The gate between what the model said and what you are allowed to see.
+///
+/// A proposal is kept only when it really appears in the paragraph, changes something, stays within
+/// its kind (grammar and punctuation may not rewrite words), and is not a dismissal you have
+/// already made. Everything else is dropped with a reason, which is what the "proposals dropped by
+/// the checks" line counts.
 nonisolated enum SuggestionVerifier {
     // AC-25. Dropped only when a change exceeds both limits; either alone is not enough.
     static let proportionLimit = 0.3
@@ -134,7 +139,8 @@ nonisolated enum SuggestionContext {
             guard local.location != NSNotFound else { return nil }
 
             let codeInside = structure.codeRanges.compactMap { $0.intersection(local) }.filter { $0.length > 0 }
-            let wholeIsCode = codeInside.contains { $0.location <= local.location && $0.upperBound >= local.upperBound }
+            let wholeIsCode =
+                codeInside.contains { $0.location <= local.location && $0.upperBound >= local.upperBound }
                 || block.text.hasPrefix("```") || block.text.hasPrefix("~~~")
 
             let masked = NSMutableString(string: block.text)
@@ -175,15 +181,17 @@ nonisolated enum SuggestionContext {
     }
 
     // The schema Ollama holds the answer to, matching RawSuggestion.
-    static let schema = try! JSONValue(parsing: """
-        {"type": "object", "required": ["suggestions"], "properties": {"suggestions": {"type": "array",
-         "items": {"type": "object", "required": ["kind", "original", "replacement", "reason"],
-         "properties": {"kind": {"type": "string", "enum": ["punctuation", "grammar"]},
-         "original": {"type": "string"}, "replacement": {"type": "string"}, "reason": {"type": "string"}}}}}}
-        """)
+    static let schema = try! JSONValue(
+        parsing: """
+            {"type": "object", "required": ["suggestions"], "properties": {"suggestions": {"type": "array",
+             "items": {"type": "object", "required": ["kind", "original", "replacement", "reason"],
+             "properties": {"kind": {"type": "string", "enum": ["punctuation", "grammar"]},
+             "original": {"type": "string"}, "replacement": {"type": "string"}, "reason": {"type": "string"}}}}}}
+            """)
 
-    static let rewriteSchema = try! JSONValue(parsing: """
-        {"type": "object", "required": ["alternatives"], "properties": {"alternatives": {"type": "array",
-         "items": {"type": "string"}}}}
-        """)
+    static let rewriteSchema = try! JSONValue(
+        parsing: """
+            {"type": "object", "required": ["alternatives"], "properties": {"alternatives": {"type": "array",
+             "items": {"type": "string"}}}}
+            """)
 }

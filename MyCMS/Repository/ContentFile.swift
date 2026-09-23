@@ -55,8 +55,11 @@ nonisolated struct FlexibleDate: Codable, Sendable, Equatable {
     }()
 }
 
-// The frontmatter block, mirroring the site's schema from Notes section 4.2. Feature 6 writes
-// this same type back out, so the reader and the writer can never disagree about a field.
+/// Every field the site's own schema defines, decoded loosely enough to survive a file written by
+/// hand.
+///
+/// Unknown keys are ignored rather than fatal, and dates accept both a quoted string and a bare
+/// YAML date through `FlexibleDate`.
 nonisolated struct Frontmatter: Codable, Sendable {
     var title: String?
     var description: String?
@@ -126,6 +129,10 @@ nonisolated struct ContentFile: Sendable {
     var hash: String
 }
 
+/// Reads one content file into frontmatter plus body, and hashes the exact bytes it read.
+///
+/// Throws when the file has no frontmatter block or the YAML will not decode, which the scan turns
+/// into a skipped finding naming the file rather than failing the whole import.
 nonisolated enum FrontmatterReader {
     static func read(fileURL: URL, collection: Document.Collection) throws -> ContentFile {
         let data: Data

@@ -1,8 +1,13 @@
 import Foundation
 import UniformTypeIdentifiers
 
-// AC-13 to AC-15. Builds the page the preview and the detail pane show, from the one renderer.
+/// Builds the page the preview and the library detail pane show, from the one renderer.
+///
+/// Pictures travel inside the page as data, so the web view never reads a file, and they come from
+/// the app's own store only. Your site's stylesheet is read fresh each time the preview opens, so a
+/// change to the site shows without relaunching.
 struct PreviewModel {
+    // Desktop fills the pane; Phone is a fixed common width, so a narrow layout can be checked.
     enum Width: String, CaseIterable, Identifiable {
         case desktop
         case phone
@@ -27,12 +32,9 @@ struct PreviewModel {
         return try? String(contentsOf: repo.appending(path: "src/styles/global.css"), encoding: .utf8)
     }
 
-    // The app's own copy first. A post imported from your site has its pictures only in the repo,
-    // so those are read from src/assets, read only, and never from anywhere outside that folder.
+    // Spec 0006 C, AC-19. The app's store only; imported pictures were adopted into it at import.
     func imageFile(for reference: String, in document: Document) -> URL? {
-        if let found = assets.resolve(reference: reference, for: document) { return found.url }
-        guard let repo else { return nil }
-        return AssetStore.repoFile(for: reference, collection: document.collection, repo: repo)
+        assets.resolve(reference: reference, for: document)?.url
     }
 
     // Pictures travel inside the page as data, so the web view never needs to read a file at all.

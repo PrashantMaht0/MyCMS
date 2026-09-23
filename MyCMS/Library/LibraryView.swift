@@ -31,7 +31,8 @@ struct LibraryView: View {
                     }
                     .tag(collection)
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(label(for: collection)), \(model.count(for: .all, in: collection)) documents")
+                    .accessibilityLabel(
+                        "\(label(for: collection)), \(model.count(for: .all, in: collection)) documents")
                 }
             }
 
@@ -42,7 +43,8 @@ struct LibraryView: View {
                     } label: {
                         HStack {
                             Text(filter.label)
-                                .foregroundStyle(model.filter == filter ? Broadsheet.Colors.text : Broadsheet.Colors.secondaryText)
+                                .foregroundStyle(
+                                    model.filter == filter ? Broadsheet.Colors.text : Broadsheet.Colors.secondaryText)
                             Spacer()
                             Text("\(model.count(for: filter, in: model.collection))")
                                 .foregroundStyle(Broadsheet.Colors.secondaryText)
@@ -50,7 +52,9 @@ struct LibraryView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Show \(filter.label), \(model.count(for: filter, in: model.collection)) documents")
+                    .accessibilityLabel(
+                        "Show \(filter.label), \(model.count(for: filter, in: model.collection)) documents"
+                    )
                     .accessibilityAddTraits(model.filter == filter ? [.isButton, .isSelected] : .isButton)
                     .keyboardShortcut(filter.shortcut, modifiers: .command)
                 }
@@ -106,6 +110,7 @@ struct LibraryView: View {
                 publisher: environment.publisher,
                 isChangedOutside: model.isChangedOutside(document.id),
                 onEdit: { onOpen(document) },
+                onDelete: { model.delete(document.id, assets: environment.assets) },
                 onLoadFile: { onResolve(document.id, .loadFile) },
                 onKeepMine: { onResolve(document.id, .keepMine) })
         } else {
@@ -126,7 +131,8 @@ struct LibraryView: View {
                 ContentUnavailableView(
                     "No \(model.filter.label.lowercased()) here",
                     systemImage: "line.3.horizontal.decrease.circle",
-                    description: Text("Switch to All to see everything in \(label(for: model.collection).lowercased()).")
+                    description: Text(
+                        "Switch to All to see everything in \(label(for: model.collection).lowercased()).")
                 )
             } else {
                 ContentUnavailableView(
@@ -182,7 +188,8 @@ private struct DocumentRow: View {
 
     private var accessibleLabel: String {
         let name = item.title.isEmpty ? "Untitled" : item.title
-        let state = isChangedOutside
+        let state =
+            isChangedOutside
             ? "changed outside the app"
             : (item.isModified ? "edited since publishing" : item.state.rawValue)
         let when = item.updatedAt.formatted(.relative(presentation: .named))
@@ -228,7 +235,8 @@ private struct Badge: View {
             .foregroundStyle(
                 isChangedOutside || item.isModified
                     ? Broadsheet.Colors.accentText
-                    : Broadsheet.Colors.secondaryText)
+                    : Broadsheet.Colors.secondaryText
+            )
             .accessibilityHidden(true)
     }
 
@@ -275,8 +283,12 @@ private struct DocumentDetail: View {
     let publisher: Publisher
     var isChangedOutside = false
     let onEdit: () -> Void
+    let onDelete: () -> Void
     var onLoadFile: () -> Void = {}
     var onKeepMine: () -> Void = {}
+
+    @State private var unpublishFlow: UnpublishFlow?
+    @State private var isConfirmingDelete = false
 
     // AC-13. The header stays put and the body scrolls inside the same renderer the preview uses.
     var body: some View {
@@ -294,12 +306,24 @@ private struct DocumentDetail: View {
                     .foregroundStyle(Broadsheet.Colors.secondaryText)
             }
 
-            Button("Edit", action: onEdit)
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .accessibilityHint("Opens this document in the editor")
+            // The editor and the library never show together, and leaving the editor saves first,
+            // so what these act on is already everything you typed (AC-1, AC-6).
+            HStack(spacing: Broadsheet.Space.x2) {
+                Button("Edit", action: onEdit)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityHint("Opens this document in the editor")
 
-            UnpushedNotice(documentID: document.id, publisher: publisher)
+                if document.state == .published {
+                    Button("Unpublish") { unpublishFlow = UnpublishFlow(document: document, publisher: publisher) }
+                        .accessibilityHint("Takes it off your site and makes it a draft again, keeping every word")
+                } else {
+                    Button("Delete", role: .destructive) { isConfirmingDelete = true }
+                        .accessibilityHint("Deletes this draft from the app for good")
+                }
+            }
+
+            UnpushedNotice(documentID: document.id, state: document.state, publisher: publisher)
 
             if !document.bodyMd.isEmpty {
                 Divider()
@@ -312,12 +336,28 @@ private struct DocumentDetail: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding([.horizontal, .top], Broadsheet.Space.x6)
         .background(Broadsheet.Colors.background)
+        .sheet(item: $unpublishFlow) { flow in
+            UnpublishSheet(flow: flow) { unpublishFlow = nil }
+        }
+        .confirmationDialog(
+            "Delete “\(document.title.isEmpty ? "Untitled" : document.title)”?",
+            isPresented: $isConfirmingDelete, titleVisibility: .visible
+        ) {
+            Button("Delete draft", role: .destructive, action: onDelete)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "Its text, versions and pictures are removed from the app. This cannot be undone. Your repository is not touched."
+            )
+        }
     }
 }
 
 // AC-44. A commit that never reached GitHub stays visible until it does.
 private struct UnpushedNotice: View {
     let documentID: UUID
+    // Read again when the state flips, so an unpublish whose push failed shows Push now at once.
+    let state: Document.State
     let publisher: Publisher
 
     @State private var row: Publish?
@@ -345,7 +385,7 @@ private struct UnpushedNotice: View {
                 .accessibilityElement(children: .contain)
             }
         }
-        .task(id: documentID) { row = try? publisher.latestPublish(for: documentID) }
+        .task(id: "\(documentID)\(state.rawValue)") { row = try? publisher.latestPublish(for: documentID) }
     }
 
     private func push(_ id: Int64) async {

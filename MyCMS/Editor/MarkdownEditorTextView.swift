@@ -79,7 +79,8 @@ final class MarkdownEditorTextView: NSTextView {
     }
 
     private static func images(on pboard: NSPasteboard) -> [IncomingImage] {
-        let urls = (pboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        let urls =
+            (pboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
         let files = urls.filter { url in
             (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType?.conforms(to: .image)) == true
         }
@@ -88,7 +89,8 @@ final class MarkdownEditorTextView: NSTextView {
         if let png = pboard.data(forType: .png) { return [.data(png, name: "pasted.png")] }
         // A screenshot arrives as TIFF, which the site cannot show, so it is turned into PNG here.
         if let tiff = pboard.data(forType: .tiff),
-            let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+            let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
+        {
             return [.data(png, name: "pasted.png")]
         }
         return []

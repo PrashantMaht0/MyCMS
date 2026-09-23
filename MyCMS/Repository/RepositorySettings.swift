@@ -1,6 +1,7 @@
 import Foundation
 
-// The portfolio repo the app publishes into, as recorded in the settings table.
+/// The recorded repository: its path, remote name and URL, branch, and whether it was dirty when it
+/// was first recorded.
 nonisolated struct RepositorySettings: Codable, Equatable, Sendable {
     var path: String
     var remoteName: String

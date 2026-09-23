@@ -13,6 +13,7 @@ xcuserdata/
 *.dSYM.zip
 *.dSYM
 
+
 ## Playgrounds
 timeline.xctimeline
 playground.xcworkspace
@@ -74,8 +75,11 @@ DerivedData/
 # Personal signing settings (see Config/Local.xcconfig.example)
 Config/Local.xcconfig
 
+# Xcode's per user state inside the project bundle
+MyCMS.xcodeproj/xcuserdata/
+MyCMS.xcodeproj/project.xcworkspace/xcuserdata/
+
 # Local design mockups, not part of the app source
 Form UI mockups pending/
 docs/
-MyCMS.xcodeproj/
 AGENTS.md

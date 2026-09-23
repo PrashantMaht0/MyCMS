@@ -11,26 +11,39 @@ nonisolated enum PublishStep: String, CaseIterable, Sendable {
     case push = "Push to GitHub"
 }
 
+// What the progress list draws beside each step.
 nonisolated enum StepState: Sendable, Equatable {
     case waiting, running, done, failed
 }
 
+// What a finished run reports: the commit, and whether it reached GitHub.
 nonisolated struct PublishResult: Sendable {
     let commitSHA: String
     let pushed: Bool
 }
 
-// A publish the app was interrupted in the middle of, found on the next launch.
+/// A publish or unpublish the app was interrupted in the middle of, found at the next launch.
+///
+/// `dirtyPaths` is the subset the repository still shows as changed, and `action` says which prompt
+/// to show and what finishing it means.
 nonisolated struct PendingPublish: Sendable, Identifiable {
     let id: Int64
     let documentID: UUID?
     let paths: [String]
     let dirtyPaths: [String]
     let message: String
+    var action: PublishPlan.Action = .publish
 }
 
-// Spec 0005 C. The one writer to your portfolio repo. It refuses rather than guesses, writes only
-// what its plan names, and leaves the working tree as it found it on any failure it survives.
+/// The one writer to your portfolio repository. Everything that changes the site goes through here.
+///
+/// It refuses rather than guesses: `preflight` stops on a change outside the content folders, a
+/// branch that is not main, or a pull that would not fast forward. `plan(for:publishDate:newSlug:)`
+/// decides every file a publish will touch before a byte is written, `planUnpublish` does the same
+/// for a takedown, and `publish`/`unpublish` then write, stage each path by name, commit and push.
+/// A failure it survives rolls every path back; a failed push keeps the commit and offers Push now.
+/// The intent row written before the first byte is what lets `reconcile` find an interrupted run at
+/// the next launch.
 @MainActor final class Publisher {
     private let git: GitClient
     private let settings: SettingsStore
@@ -38,7 +51,9 @@ nonisolated struct PendingPublish: Sendable, Identifiable {
     private let documents: DocumentStore
     private let revisions: RevisionStore
 
-    init(git: GitClient, settings: SettingsStore, assets: AssetStore, documents: DocumentStore, revisions: RevisionStore) {
+    init(
+        git: GitClient, settings: SettingsStore, assets: AssetStore, documents: DocumentStore, revisions: RevisionStore
+    ) {
         self.git = git
         self.settings = settings
         self.assets = assets
@@ -88,72 +103,139 @@ nonisolated struct PendingPublish: Sendable, Identifiable {
 
     // MARK: Validation and planning
 
+    // Spec 0006 C, AC-20. A picture the app does not hold is missing, whatever the repo has.
     func validator(for document: Document) -> DocumentValidator {
-        let repoURL = try? repo().url
         let assets = assets
         return DocumentValidator { reference in
-            if assets.resolve(reference: reference, for: document) != nil { return true }
-            guard let repoURL else { return false }
-            return AssetStore.repoFile(for: reference, collection: document.collection, repo: repoURL) != nil
+            assets.resolve(reference: reference, for: document) != nil
         }
     }
 
-    func plan(for document: Document, publishDate: Date) throws -> PublishPlan {
+    // Spec 0006 A, AC-8 to AC-10. A new slug lives only in this plan; the document's own slug, body
+    // and cover move after the commit exists, in recordPublished.
+    func plan(for document: Document, publishDate: Date, newSlug: String? = nil) throws -> PublishPlan {
+        if let newSlug {
+            guard SlugRule.isValid(newSlug) else { throw PublishError.slugInvalid(newSlug) }
+            guard !(try documents.isSlugTaken(newSlug, in: document.collection, except: document.id)) else {
+                throw PublishError.slugTaken(newSlug)
+            }
+        }
+
         let rules = validator(for: document).validate(document)
-        guard DocumentValidator.allPass(rules), let slug = document.slug else {
+        guard DocumentValidator.allPass(rules), let current = document.slug else {
             throw PublishError.validationFailed(rules)
         }
+        let slug = newSlug ?? current
         let repo = try repo()
-        let contentPath = "src/content/\(document.collection.rawValue)/\(slug).md"
+        let collection = document.collection.rawValue
+        let contentPath = "src/content/\(collection)/\(slug).md"
         let isFirst = document.publishedSlug == nil
+        let old = document.publishedSlug.flatMap { $0 == slug ? nil : $0 }
+
+        // The files carry the new address; the stored document keeps the old one until the commit.
+        var written = document
+        if slug != current {
+            written.bodyMd = AssetStore.rewriteReferences(
+                in: document.bodyMd, from: current, to: slug, collection: document.collection)
+            written.cover = document.cover.map {
+                AssetStore.movedPath($0, from: current, to: slug, collection: document.collection)
+            }
+        }
 
         let updatedDate = try decideUpdatedDate(
-            for: document, publishDate: publishDate, repo: repo.url, isFirst: isFirst)
-        let text = try FrontmatterWriter.serialize(document, publishDate: publishDate, updatedDate: updatedDate)
+            for: written, publishDate: publishDate, repo: repo.url, isFirst: isFirst)
+        let text = try FrontmatterWriter.serialize(written, publishDate: publishDate, updatedDate: updatedDate)
         let data = Data(text.utf8)
 
         var changes: [PublishPlan.Change] = []
         if Self.contents(of: repo.url, contentPath) != data {
             changes.append(.write(path: contentPath, data: data))
         }
-        changes += try imageCopies(for: document, slug: slug, repo: repo.url)
+        changes += try imageCopies(for: written, slug: slug, repo: repo.url)
 
-        // AC-41. A published slug that moved leaves a redirect behind and its old file goes.
-        if let old = document.publishedSlug, old != slug {
-            let oldPath = "src/content/\(document.collection.rawValue)/\(old).md"
+        // AC-9. A moved address takes its old file and its known pictures with it, and leaves a redirect.
+        if let old {
+            let oldPath = "src/content/\(collection)/\(old).md"
             if Self.contents(of: repo.url, oldPath) != nil { changes.append(.delete(path: oldPath)) }
+            changes += try PublishPlan.retireFolder(
+                collection: document.collection, slug: old, known: storedNames(of: document), repo: repo.url)
 
-            guard let redirects = Self.contents(of: repo.url, Redirects.path).flatMap({ String(data: $0, encoding: .utf8) })
+            guard
+                let redirects = Self.contents(of: repo.url, Redirects.path).flatMap({
+                    String(data: $0, encoding: .utf8)
+                })
             else { throw PublishError.redirectsUnreadable(reason: "The file is missing or is not text.") }
             let updated = try Redirects.adding(
-                from: "/\(document.collection.rawValue)/\(old)", to: "/\(document.collection.rawValue)/\(slug)",
-                in: redirects)
+                from: "/\(collection)/\(old)", to: "/\(collection)/\(slug)", in: redirects)
             if updated != redirects { changes.append(.write(path: Redirects.path, data: Data(updated.utf8))) }
         }
 
         guard !changes.isEmpty else { throw PublishError.nothingChanged }
-        precondition(changes.allSatisfy { PublishPlan.isAllowed($0.path) }, "A publish plan named a path outside the allowed folders")
+        precondition(
+            changes.allSatisfy { PublishPlan.isAllowed($0.path) },
+            "A publish plan named a path outside the allowed folders")
 
-        let verb = isFirst ? "Publish" : "Update"
+        let verb = isFirst ? "Publish" : (document.state == .draft ? "Republish" : "Update")
         return PublishPlan(
             documentID: document.id, collection: document.collection, slug: slug, changes: changes,
-            defaultMessage: "\(verb) \(document.collection.rawValue)/\(slug)",
+            defaultMessage: "\(verb) \(collection)/\(slug)",
             publishDate: publishDate, updatedDate: updatedDate,
-            fileHash: ContentHash.sha256(data), isFirstPublish: isFirst)
+            fileHash: ContentHash.sha256(data), isFirstPublish: isFirst,
+            movedFrom: slug != current ? current : nil)
+    }
+
+    // Spec 0006 A, AC-3. The post's Markdown and the pictures the app can put back, nothing else.
+    func planUnpublish(for document: Document) throws -> PublishPlan {
+        guard document.state == .published, let slug = document.publishedSlug else { throw PublishError.notPublished }
+        let repo = try repo()
+        let collection = document.collection.rawValue
+
+        var changes: [PublishPlan.Change] = []
+        let contentPath = "src/content/\(collection)/\(slug).md"
+        if Self.contents(of: repo.url, contentPath) != nil { changes.append(.delete(path: contentPath)) }
+        changes += try PublishPlan.retireFolder(
+            collection: document.collection, slug: slug, known: storedNames(of: document), repo: repo.url)
+        precondition(
+            changes.allSatisfy { PublishPlan.isAllowed($0.path) },
+            "An unpublish plan named a path outside the allowed folders")
+
+        return PublishPlan(
+            documentID: document.id, collection: document.collection, slug: slug, changes: changes,
+            defaultMessage: "Unpublish \(collection)/\(slug)",
+            publishDate: document.publishDate ?? Date(), updatedDate: document.updatedDate,
+            fileHash: document.publishedHash ?? "", isFirstPublish: false, action: .unpublish)
+    }
+
+    // Spec 0006 A, AC-1. Redirects that will lead to a missing page once this post comes down.
+    func redirectsPointing(at document: Document) -> [String] {
+        guard let slug = document.publishedSlug, let repo = try? repo().url,
+            let text = Self.contents(of: repo, Redirects.path).flatMap({ String(data: $0, encoding: .utf8) })
+        else { return [] }
+        return Redirects.sources(pointingAt: "/\(document.collection.rawValue)/\(slug)", in: text)
+    }
+
+    private func storedNames(of document: Document) throws -> Set<String> {
+        Set(try assets.assets(for: document).map(\.fileName))
     }
 
     // AC-47. The date moves only when what a reader sees would change: identical bytes to the last
     // publish mean no, and so does a file on disk whose visible fields and body already match.
-    private func decideUpdatedDate(for document: Document, publishDate: Date, repo: URL, isFirst: Bool) throws -> Date? {
+    private func decideUpdatedDate(for document: Document, publishDate: Date, repo: URL, isFirst: Bool) throws -> Date?
+    {
         guard !isFirst else { return nil }
 
-        let unchanged = try FrontmatterWriter.serialize(document, publishDate: publishDate, updatedDate: document.updatedDate)
+        let unchanged = try FrontmatterWriter.serialize(
+            document, publishDate: publishDate, updatedDate: document.updatedDate)
         if ContentHash.sha256(Data(unchanged.utf8)) == document.publishedHash { return document.updatedDate }
 
         let path = "src/content/\(document.collection.rawValue)/\(document.publishedSlug ?? "").md"
-        if let onDisk = try? FrontmatterReader.read(fileURL: repo.appending(path: path), collection: document.collection),
+        if let onDisk = try? FrontmatterReader.read(
+            fileURL: repo.appending(path: path), collection: document.collection),
             Self.readerSees(onDisk.frontmatter, onDisk.body)
-                == Self.readerSees(FrontmatterWriter.frontmatter(for: document, publishDate: publishDate, updatedDate: nil), document.bodyMd) {
+                == Self.readerSees(
+                    FrontmatterWriter.frontmatter(for: document, publishDate: publishDate, updatedDate: nil),
+                    document.bodyMd)
+        {
             return document.updatedDate
         }
         return Date()
@@ -173,10 +255,13 @@ nonisolated struct PendingPublish: Sendable, Identifiable {
     // AC-40. Each stored picture the post uses goes to src/assets/<collection>/<slug>/, unless an
     // identical file is already there.
     private func imageCopies(for document: Document, slug: String, repo: URL) throws -> [PublishPlan.Change] {
-        var referenced = Set(MarkdownRenderer.parse(document.bodyMd).images.compactMap {
-            AssetStore.fileName(inReference: $0.source, collection: document.collection)
-        })
-        if let cover = document.cover, let name = AssetStore.fileName(inReference: cover, collection: document.collection) {
+        var referenced = Set(
+            MarkdownRenderer.parse(document.bodyMd).images.compactMap {
+                AssetStore.fileName(inReference: $0.source, collection: document.collection)
+            })
+        if let cover = document.cover,
+            let name = AssetStore.fileName(inReference: cover, collection: document.collection)
+        {
             referenced.insert(name)
         }
 
@@ -197,15 +282,40 @@ nonisolated struct PendingPublish: Sendable, Identifiable {
         _ plan: PublishPlan, message: String, document: Document,
         progress: (PublishStep, StepState) -> Void
     ) async throws -> PublishResult {
+        try await run(plan, message: message, document: document, progress: progress)
+    }
+
+    // Spec 0006 A, AC-2 to AC-4. The same checks, staging, rollback and push as a publish.
+    func unpublish(
+        _ plan: PublishPlan, message: String, document: Document,
+        progress: (PublishStep, StepState) -> Void
+    ) async throws -> PublishResult {
+        precondition(plan.action == .unpublish, "unpublish was handed a publish plan")
+        // A post whose files are already gone has nothing to commit; it just becomes a draft.
+        guard !plan.changes.isEmpty else {
+            try await preflight()
+            try recordUnpublished(plan)
+            return PublishResult(commitSHA: "", pushed: true)
+        }
+        return try await run(plan, message: message, document: document, progress: progress)
+    }
+
+    private func run(
+        _ plan: PublishPlan, message: String, document: Document,
+        progress: (PublishStep, StepState) -> Void
+    ) async throws -> PublishResult {
         let repo = try repo()
 
         progress(.preflight, .running)
-        do { try await preflight() } catch { progress(.preflight, .failed); throw error }
+        do { try await preflight() } catch {
+            progress(.preflight, .failed)
+            throw error
+        }
         progress(.preflight, .done)
 
         // AC-46. The trace exists before the first byte does.
         let rowID = try writeIntent(plan, message: message)
-        snapshot(document)
+        if plan.action == .publish { snapshot(document) }
 
         progress(.write, .running)
         var originals: [String: Data?] = [:]
@@ -242,7 +352,11 @@ nonisolated struct PendingPublish: Sendable, Identifiable {
         Loggers.publish.info("Committed \(plan.defaultMessage, privacy: .public) as \(sha, privacy: .public)")
 
         // AC-45. The document records what is now in the repo, whether or not the push lands.
-        try recordPublished(plan, sha: sha, rowID: rowID)
+        switch plan.action {
+        case .publish: try recordPublished(plan, document: document)
+        case .unpublish: try recordUnpublished(plan)
+        }
+        try updateRow(rowID, status: "committed_not_pushed", sha: sha, error: nil)
 
         progress(.push, .running)
         let push = try await git.push(at: repo.url, remote: repo.remote, branch: repo.branch)
@@ -281,16 +395,20 @@ nonisolated struct PendingPublish: Sendable, Identifiable {
 
     // AC-46. A publish still pending at launch was interrupted by a crash or a force quit.
     func reconcile() async throws -> PendingPublish? {
-        guard let row = try documents.read({ db in
-            try Publish.filter(Column("status") == "pending").order(Column("id")).fetchOne(db)
-        }), let id = row.id else { return nil }
+        guard
+            let row = try documents.read({ db in
+                try Publish.filter(Column("status") == "pending").order(Column("id")).fetchOne(db)
+            }), let id = row.id
+        else { return nil }
 
-        let intent = (try? DatabaseJSON.decode(Intent.self, from: row.filesJson)) ?? Intent(paths: [], message: "")
+        let intent =
+            (try? DatabaseJSON.decode(Intent.self, from: row.filesJson)) ?? Intent(action: nil, paths: [], message: "")
         let repo = try repo()
         let changed = Set(try await git.changedPaths(at: repo.url))
         return PendingPublish(
             id: id, documentID: row.documentId, paths: intent.paths,
-            dirtyPaths: intent.paths.filter(changed.contains), message: intent.message)
+            dirtyPaths: intent.paths.filter(changed.contains), message: intent.message,
+            action: intent.action ?? .publish)
     }
 
     // Puts every path the interrupted publish touched back as the last commit has it.
@@ -312,13 +430,24 @@ nonisolated struct PendingPublish: Sendable, Identifiable {
         let repo = try repo()
         for path in pending.dirtyPaths { try await git.add(at: repo.url, path: path) }
         let sha = try await git.commit(at: repo.url, message: pending.message)
+        // AC-11. A finished takedown leaves the document a draft, as an uninterrupted one would.
+        if pending.action == .unpublish, let id = pending.documentID {
+            try documents.update(
+                id: id,
+                [
+                    Column("state").set(to: Document.State.draft.rawValue),
+                    Column("published_at").set(to: Date?.none),
+                ])
+        }
         try updateRow(pending.id, status: "committed_not_pushed", sha: sha, error: nil)
         try await pushPending(rowID: pending.id)
     }
 
     // MARK: Pieces
 
+    // A row written before spec 0006 has no action, and reads as a publish.
     private struct Intent: Codable {
+        let action: PublishPlan.Action?
         let paths: [String]
         let message: String
     }
@@ -326,7 +455,7 @@ nonisolated struct PendingPublish: Sendable, Identifiable {
     private func writeIntent(_ plan: PublishPlan, message: String) throws -> Int64 {
         let row = Publish(
             documentId: plan.documentID, collection: plan.collection.rawValue, slug: plan.slug,
-            filesJson: try DatabaseJSON.encode(Intent(paths: plan.paths, message: message)),
+            filesJson: try DatabaseJSON.encode(Intent(action: plan.action, paths: plan.paths, message: message)),
             status: "pending", createdAt: Date())
         return try documents.write { db in
             try row.insert(db)
@@ -356,20 +485,43 @@ nonisolated struct PendingPublish: Sendable, Identifiable {
         }
     }
 
-    private func recordPublished(_ plan: PublishPlan, sha: String, rowID: Int64) throws {
+    private func recordPublished(_ plan: PublishPlan, document: Document) throws {
         let now = Date()
+        var assignments = [
+            Column("state").set(to: Document.State.published.rawValue),
+            Column("published_slug").set(to: plan.slug),
+            Column("published_hash").set(to: plan.fileHash),
+            Column("published_at").set(to: now),
+            Column("publish_date").set(to: plan.publishDate),
+            Column("updated_date").set(to: plan.updatedDate),
+            // Stamped with the same instant, so the library does not call it modified straight away.
+            Column("updated_at").set(to: now),
+        ]
+        // Spec 0006 A, AC-9. The slug and every path that names it move together, and only now.
+        if let old = plan.movedFrom {
+            let collection = document.collection
+            assignments += [
+                Column("slug").set(to: plan.slug),
+                Column("body_md").set(
+                    to: AssetStore.rewriteReferences(
+                        in: document.bodyMd, from: old, to: plan.slug, collection: collection)),
+                Column("cover").set(
+                    to: document.cover.map {
+                        AssetStore.movedPath($0, from: old, to: plan.slug, collection: collection)
+                    }),
+            ]
+        }
+        try documents.update(id: plan.documentID, assignments)
+    }
+
+    // Spec 0006 A, AC-4. Only the live state goes; the address and last bytes stay for a republish.
+    private func recordUnpublished(_ plan: PublishPlan) throws {
         try documents.update(
-            id: plan.documentID, [
-                Column("state").set(to: Document.State.published.rawValue),
-                Column("published_slug").set(to: plan.slug),
-                Column("published_hash").set(to: plan.fileHash),
-                Column("published_at").set(to: now),
-                Column("publish_date").set(to: plan.publishDate),
-                Column("updated_date").set(to: plan.updatedDate),
-                // Stamped with the same instant, so the library does not call it modified straight away.
-                Column("updated_at").set(to: now),
+            id: plan.documentID,
+            [
+                Column("state").set(to: Document.State.draft.rawValue),
+                Column("published_at").set(to: Date?.none),
             ])
-        try updateRow(rowID, status: "committed_not_pushed", sha: sha, error: nil)
     }
 
     private func apply(_ change: PublishPlan.Change, in repo: URL) throws {
@@ -377,10 +529,12 @@ nonisolated struct PendingPublish: Sendable, Identifiable {
         do {
             switch change {
             case .write(_, let data):
-                try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try FileManager.default.createDirectory(
+                    at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try data.write(to: target, options: .atomic)
             case .copy(_, let source):
-                try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try FileManager.default.createDirectory(
+                    at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try Data(contentsOf: source).write(to: target, options: .atomic)
             case .delete:
                 try FileManager.default.removeItem(at: target)

@@ -1,6 +1,7 @@
 import Foundation
 import GRDB
 import Testing
+
 @testable import MyCMS
 
 @Suite("Revisions")
@@ -45,7 +46,8 @@ struct RevisionTests {
         #expect(autosave.reason == "autosave")
         #expect(autosave.bodyMd == "")
 
-        let older = Revision(documentId: created.id, bodyMd: "Old words.", snapshotJson: "{}", reason: "publish", createdAt: Date())
+        let older = Revision(
+            documentId: created.id, bodyMd: "Old words.", snapshotJson: "{}", reason: "publish", createdAt: Date())
         session.restore(older)
         await session.flush()
 
@@ -96,4 +98,3 @@ struct WordDiffTests {
         #expect(rebuilt == new)
     }
 }
-

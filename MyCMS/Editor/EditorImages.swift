@@ -1,8 +1,11 @@
 import AppKit
 import SwiftUI
 
-// AC-9 and AC-66. A picture is copied in first, then its alt text is asked for, and only then
-// does anything reach the body or the cover. Cancelling the question removes the copy again.
+/// Everything that happens between a picture arriving and its Markdown landing in the text.
+///
+/// A picture can arrive by drop, paste or the file picker, and goes to the body or the cover. It is
+/// stored first, then the alt text is asked for; cancelling removes what was stored, so a refused
+/// picture leaves nothing behind.
 @Observable final class ImageInsertion {
     enum Target {
         // Nil means wherever the caret is by the time this picture's turn comes.
@@ -35,11 +38,12 @@ import SwiftUI
     func receive(_ images: [MarkdownEditorTextView.IncomingImage], target: Target) async {
         // A title typed a moment ago may not have claimed its slug yet, so that save goes first.
         if session.document.slug == nil { await session.flush() }
-        queue.append(contentsOf: images.enumerated().map { index, image in
-            // Only the first picture goes to the drop point; the rest follow it down the page.
-            if case .body = target, index > 0 { return (image, .body(nil)) }
-            return (image, target)
-        })
+        queue.append(
+            contentsOf: images.enumerated().map { index, image in
+                // Only the first picture goes to the drop point; the rest follow it down the page.
+                if case .body = target, index > 0 { return (image, .body(nil)) }
+                return (image, target)
+            })
         advance()
     }
 
@@ -47,7 +51,8 @@ import SwiftUI
         guard let pending, let slug = session.document.slug else { return }
         self.pending = nil
 
-        let cleanAlt = alt
+        let cleanAlt =
+            alt
             .replacingOccurrences(of: "[", with: "")
             .replacingOccurrences(of: "]", with: "")
             .replacingOccurrences(of: "\n", with: " ")

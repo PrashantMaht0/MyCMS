@@ -8,6 +8,7 @@ nonisolated enum DataError: LocalizedError {
     case notOpen
     case notFound
     case slugTaken
+    case publishedCannotBeDeleted
 
     var errorDescription: String? {
         switch self {
@@ -23,6 +24,8 @@ nonisolated enum DataError: LocalizedError {
             "That document is no longer in the database."
         case .slugTaken:
             "Another document in this collection already uses that slug."
+        case .publishedCannotBeDeleted:
+            "This document is live on your site. Unpublish it first, then delete it."
         }
     }
 
@@ -31,7 +34,7 @@ nonisolated enum DataError: LocalizedError {
         switch self {
         case .directoryUnavailable(let path, _), .openFailed(let path, _), .migrationFailed(let path, _):
             path
-        case .notOpen, .notFound, .slugTaken:
+        case .notOpen, .notFound, .slugTaken, .publishedCannotBeDeleted:
             nil
         }
     }

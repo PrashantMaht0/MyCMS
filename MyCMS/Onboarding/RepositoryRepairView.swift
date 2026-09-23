@@ -1,9 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-// The blocking screen for a repo that was recorded once and no longer works. The library stays
-// closed on purpose: every published document refers to files the app cannot see, so showing
-// them as published would be a lie.
+// Blocks the app when the recorded repo stops working. The library stays closed, because calling
+// documents published while their files are out of reach would be a lie.
 struct RepositoryRepairView: View {
     let reason: String
     let recordedPath: String?
@@ -39,10 +38,12 @@ struct RepositoryRepairView: View {
                 .background(Broadsheet.Colors.surface, in: .rect(cornerRadius: Broadsheet.Radius.medium))
             }
 
-            Text("Choosing a different repo clears every recorded file hash and imports again, because those hashes describe files in the old one.")
-                .font(.system(size: Broadsheet.TypeScale.uiLarge))
-                .foregroundStyle(Broadsheet.Colors.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
+            Text(
+                "Choosing a different repo clears every recorded file hash and imports again, because those hashes describe files in the old one."
+            )
+            .font(.system(size: Broadsheet.TypeScale.uiLarge))
+            .foregroundStyle(Broadsheet.Colors.secondaryText)
+            .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: Broadsheet.Space.x2) {
                 Button("Choose again") { isChoosingFolder = true }

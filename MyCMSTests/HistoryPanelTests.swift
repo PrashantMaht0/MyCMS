@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Testing
+
 @testable import MyCMS
 
 @Suite("History panel")
@@ -22,7 +23,9 @@ struct HistoryPanelTests {
         try revisions.snapshot(document, body: "Oldest words.", reason: .publish, at: Date().addingTimeInterval(-60))
 
         let host = NSHostingView(rootView: HistoryPanel(session: session, revisions: revisions))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 340, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 340, height: 600), styleMask: [.titled], backing: .buffered,
+            defer: false)
         window.contentView = host
         window.makeKeyAndOrderFront(nil)
         for _ in 0..<10 { try await Task.sleep(for: .milliseconds(20)) }

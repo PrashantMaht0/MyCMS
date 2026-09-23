@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import MyCMS
 
 private func range(of substring: String, in text: String) -> NSRange {
@@ -36,10 +37,12 @@ struct MarkdownStructureTests {
         let text = "Some **bold** and *thin* words.\n"
         let structure = MarkdownRenderer.parse(text)
 
-        #expect(structure.runs(in: range(of: "**bold**", in: text))
-            .contains { $0.style == .strong && $0.range == range(of: "**bold**", in: text) })
-        #expect(structure.runs(in: range(of: "*thin*", in: text))
-            .contains { $0.style == .emphasis && $0.range == range(of: "*thin*", in: text) })
+        #expect(
+            structure.runs(in: range(of: "**bold**", in: text))
+                .contains { $0.style == .strong && $0.range == range(of: "**bold**", in: text) })
+        #expect(
+            structure.runs(in: range(of: "*thin*", in: text))
+                .contains { $0.style == .emphasis && $0.range == range(of: "*thin*", in: text) })
 
         let markers = structure.runs(in: range(of: "**bold**", in: text))
             .filter { $0.style == .marker }
@@ -106,13 +109,15 @@ struct MarkdownStructureTests {
         #expect(styles(coveringStartOf: "Quoted line", in: structure).contains(.blockQuote))
         #expect(structure.runs(in: range(of: "> ", in: text)).contains { $0.style == .marker })
 
-        #expect(styles(coveringStartOf: "First item", in: structure)
-            .contains { if case .listItem = $0 { true } else { false } })
+        #expect(
+            styles(coveringStartOf: "First item", in: structure)
+                .contains { if case .listItem = $0 { true } else { false } })
         #expect(structure.runs(in: range(of: "- ", in: text)).contains { $0.style == .marker })
 
         #expect(styles(coveringStartOf: "link", in: structure).contains(.link))
-        #expect(structure.runs(in: range(of: "](https://example.com)", in: text))
-            .contains { $0.style == .marker && $0.range == range(of: "](https://example.com)", in: text) })
+        #expect(
+            structure.runs(in: range(of: "](https://example.com)", in: text))
+                .contains { $0.style == .marker && $0.range == range(of: "](https://example.com)", in: text) })
     }
 
     @Test("A run that starts before the asked for range is still returned")
@@ -130,14 +135,16 @@ struct MarkdownStructureTests {
         let structure = MarkdownRenderer.parse(text)
         let window = NSRange(location: 3, length: 4)
 
-        #expect(structure.runs(in: window).allSatisfy {
-            $0.range.location >= window.location && $0.range.upperBound <= window.upperBound
-        })
+        #expect(
+            structure.runs(in: window).allSatisfy {
+                $0.range.location >= window.location && $0.range.upperBound <= window.upperBound
+            })
     }
 
     @Test("A five thousand word post parses and styles a viewport well inside a frame, per AC-4")
     func parsingAndStylingStayFast() {
-        let paragraph = "## A heading in the middle of it\n\n"
+        let paragraph =
+            "## A heading in the middle of it\n\n"
             + "Some **bold** words and some *italic* ones, with `inline code` and a "
             + "[link](https://example.com) to finish, repeated until the post is a real length.\n\n"
         let text = String(repeating: paragraph, count: 200)
@@ -164,7 +171,8 @@ struct MarkdownStructureTests {
         let bold = range(of: "**bold**", in: text)
         let shifted = structure.shifted(after: 0, by: 5)
 
-        #expect(shifted.runs(in: NSRange(location: bold.location + 5, length: bold.length))
-            .contains { $0.style == .strong })
+        #expect(
+            shifted.runs(in: NSRange(location: bold.location + 5, length: bold.length))
+                .contains { $0.style == .strong })
     }
 }

@@ -114,7 +114,8 @@ import OSLog
         ollamaStep = .running
 
         Task { [ollama, settings, repository] in
-            let expected = (try? settings.string(forKey: SettingsKey.ollamaModel))
+            let expected =
+                (try? settings.string(forKey: SettingsKey.ollamaModel))
                 .flatMap { $0 } ?? OllamaClient.defaultModel
 
             let outcome: CheckOutcome

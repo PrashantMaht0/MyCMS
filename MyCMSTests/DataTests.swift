@@ -1,6 +1,7 @@
 import Foundation
 import GRDB
 import Testing
+
 @testable import MyCMS
 
 // A clock the tests move by hand, so every timestamp in an assertion is a known value.
@@ -134,17 +135,19 @@ struct SchemaTests {
 
         try database.write { db in
             #expect(throws: DatabaseError.self) {
-                try db.execute(sql: """
-                    INSERT INTO documents (id, collection, state, created_at, updated_at)
-                    VALUES ('a', 'notes', 'draft', '2026-01-01', '2026-01-01')
-                    """)
+                try db.execute(
+                    sql: """
+                        INSERT INTO documents (id, collection, state, created_at, updated_at)
+                        VALUES ('a', 'notes', 'draft', '2026-01-01', '2026-01-01')
+                        """)
             }
 
             #expect(throws: DatabaseError.self) {
-                try db.execute(sql: """
-                    INSERT INTO documents (id, collection, state, created_at, updated_at)
-                    VALUES ('b', 'blog', 'modified', '2026-01-01', '2026-01-01')
-                    """)
+                try db.execute(
+                    sql: """
+                        INSERT INTO documents (id, collection, state, created_at, updated_at)
+                        VALUES ('b', 'blog', 'modified', '2026-01-01', '2026-01-01')
+                        """)
             }
         }
     }
@@ -154,18 +157,20 @@ struct SchemaTests {
         let database = try MyCMS.Database.inMemory()
 
         try database.write { db in
-            try db.execute(sql: """
-                INSERT INTO documents (id, collection, state, created_at, updated_at)
-                VALUES ('doc', 'blog', 'draft', '2026-01-01', '2026-01-01')
-                """)
+            try db.execute(
+                sql: """
+                    INSERT INTO documents (id, collection, state, created_at, updated_at)
+                    VALUES ('doc', 'blog', 'draft', '2026-01-01', '2026-01-01')
+                    """)
 
             // An outcome nobody has named yet is still accepted.
-            try db.execute(sql: """
-                INSERT INTO ai_suggestions
-                    (document_id, kind, original, replacement, reason, model,
-                     prompt_version, latency_ms, outcome, created_at)
-                VALUES ('doc', 'invented', 'a', 'b', 'c', 'm', 'v1', 10, 'invented', '2026-01-01')
-                """)
+            try db.execute(
+                sql: """
+                    INSERT INTO ai_suggestions
+                        (document_id, kind, original, replacement, reason, model,
+                         prompt_version, latency_ms, outcome, created_at)
+                    VALUES ('doc', 'invented', 'a', 'b', 'c', 'm', 'v1', 10, 'invented', '2026-01-01')
+                    """)
         }
     }
 }

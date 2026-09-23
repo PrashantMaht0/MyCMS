@@ -1,8 +1,10 @@
 import Foundation
 import Markdown
 
-// The parsed shape of one document: every styled run, and every range the spell checker
-// and the AI loop must leave alone. Built once per parse, then read per viewport.
+/// What one parse produced: styled runs, code ranges, image references and a line index.
+///
+/// `shifted(after:by:)` moves the whole tree to match an edit without reparsing, which is what lets
+/// the editor stay styled between parses. `isCode` is how every other rule avoids touching code.
 nonisolated struct MarkdownStructure: Sendable {
     let lineIndex: LineIndex
     let codeRanges: [NSRange]

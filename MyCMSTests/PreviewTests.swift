@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import MyCMS
 
 @Suite("HTML and preview")
@@ -8,22 +9,23 @@ struct PreviewTests {
 
     @Test("Headings, lists, quotes, code, links and emphasis all come out as HTML, per AC-13")
     func blocksRender() {
-        let html = MarkdownRenderer.html(for: """
-            ## Title
+        let html = MarkdownRenderer.html(
+            for: """
+                ## Title
 
-            Some **bold** and *thin* and ~~gone~~.
+                Some **bold** and *thin* and ~~gone~~.
 
-            > Quoted
+                > Quoted
 
-            - one
-            - two
+                - one
+                - two
 
-            3. three
+                3. three
 
-            A [link](https://example.com "tip").
+                A [link](https://example.com "tip").
 
-            ---
-            """)
+                ---
+                """)
 
         #expect(html.contains("<h2>Title</h2>"))
         #expect(html.contains("<strong>bold</strong>"))
@@ -82,23 +84,27 @@ struct PreviewTests {
     @Test("A real repository's stylesheet is read from src/styles/global.css")
     func readsTheSiteStylesheet() throws {
         let repo = FileManager.default.temporaryDirectory.appending(path: "repo-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: repo.appending(path: "src/styles"), withIntermediateDirectories: true)
-        try ".prose { margin: 0 }".write(to: repo.appending(path: "src/styles/global.css"), atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(
+            at: repo.appending(path: "src/styles"), withIntermediateDirectories: true)
+        try ".prose { margin: 0 }".write(
+            to: repo.appending(path: "src/styles/global.css"), atomically: true, encoding: .utf8)
 
         let database = try MyCMS.Database.inMemory()
         let settings = SettingsStore(database: database)
         try settings.set(repo.path(percentEncoded: false), forKey: SettingsKey.repoPath)
 
-        #expect(PreviewModel(settings: settings, assets: AssetStore(database: database)).siteStylesheet() == ".prose { margin: 0 }")
+        #expect(
+            PreviewModel(settings: settings, assets: AssetStore(database: database)).siteStylesheet()
+                == ".prose { margin: 0 }")
     }
 
-    @Test("An imported post's picture is read from the repo's src/assets, and nothing outside it")
-    func repoImagesResolveReadOnly() throws {
+    @Test("A picture only the repo holds is not read, so the preview shows its alt text, per spec 0006 AC-19 and AC-20")
+    func repoImagesAreNeverRead() throws {
         let repo = FileManager.default.temporaryDirectory.appending(path: "repo-\(UUID().uuidString)")
         let folder = repo.appending(path: "src/assets/blog/trip")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try Data([1, 2, 3]).write(to: folder.appending(path: "pic.jpg"))
-        try Data([1]).write(to: repo.appending(path: "secret.txt"))
+        defer { try? FileManager.default.removeItem(at: repo) }
 
         let database = try MyCMS.Database.inMemory()
         let settings = SettingsStore(database: database)
@@ -106,12 +112,10 @@ struct PreviewTests {
         let model = PreviewModel(settings: settings, assets: AssetStore(database: database))
         let document = try DocumentStore(database: database).create(collection: .blog)
 
-        #expect(model.imageFile(for: "../../assets/blog/trip/pic.jpg", in: document)?.lastPathComponent == "pic.jpg")
-        #expect(model.imageFile(for: "../../../secret.txt", in: document) == nil)
-        #expect(model.imageFile(for: "../../assets/blog/trip/nope.jpg", in: document) == nil)
-        #expect(model.imageFile(for: "https://example.com/a.png", in: document) == nil)
+        #expect(model.imageFile(for: "../../assets/blog/trip/pic.jpg", in: document) == nil)
 
         let page = model.page(for: document, body: "![a trip](../../assets/blog/trip/pic.jpg)\n", stylesheet: nil)
-        #expect(page.contains("src=\"data:image/jpeg;base64,AQID\""))
+        #expect(!page.contains("base64,AQID"))
+        #expect(page.contains("a trip"))
     }
 }

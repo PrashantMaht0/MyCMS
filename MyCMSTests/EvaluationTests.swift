@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import MyCMS
 
 extension Tag {
@@ -14,13 +15,26 @@ private nonisolated struct Fixture: Sendable {
 }
 
 private nonisolated let fixtures: [Fixture] = [
-    Fixture(paragraph: "Complete Higher Education \u{2014}\u{2014}> Complete Bachelor’s in Computer Applications \u{2014}\u{2014}> Complete Master's aboard \u{2014}\u{2014}> Get the Job.", expected: "abroad"),
-    Fixture(paragraph: "Its really true that the people you surround yourself with influence your life in many ways.", expected: "It's"),
-    Fixture(paragraph: "I have traveled to many places in Ireland met many people.Still, traveling through irish roads a wave of nostalgia hits.", expected: "people. Still"),
-    Fixture(paragraph: "From the very young age computers and technology was always been my favorite subject in school.", expected: "had always been"),
+    Fixture(
+        paragraph:
+            "Complete Higher Education \u{2014}\u{2014}> Complete Bachelor’s in Computer Applications \u{2014}\u{2014}> Complete Master's aboard \u{2014}\u{2014}> Get the Job.",
+        expected: "abroad"),
+    Fixture(
+        paragraph: "Its really true that the people you surround yourself with influence your life in many ways.",
+        expected: "It's"),
+    Fixture(
+        paragraph:
+            "I have traveled to many places in Ireland met many people.Still, traveling through irish roads a wave of nostalgia hits.",
+        expected: "people. Still"),
+    Fixture(
+        paragraph: "From the very young age computers and technology was always been my favorite subject in school.",
+        expected: "had always been"),
     Fixture(paragraph: "I miss all the cafes and restaurants I use to go.", expected: "used to go"),
     Fixture(paragraph: "Graduations day is next month.", expected: "Graduation day"),
-    Fixture(paragraph: "Type a topic and five small agents take it from there: one searches the web, one checks the findings are true, one writes the post, one reviews how it reads, and one publishes it to Google Blogger.", expected: nil),
+    Fixture(
+        paragraph:
+            "Type a topic and five small agents take it from there: one searches the web, one checks the findings are true, one writes the post, one reviews how it reads, and one publishes it to Google Blogger.",
+        expected: nil),
 ]
 
 // AC-34. Runs the real prompt against the real local model, so it only runs when asked:
@@ -39,7 +53,8 @@ struct EvaluationTests {
         for fixture in fixtures {
             let paragraphs = SuggestionContext.paragraphs(of: fixture.paragraph)
             let message = SuggestionContext.message(
-                title: "My Journey to Ireland", subtitle: "My first blog", paragraphs: paragraphs, target: 0, budget: 20_000)
+                title: "My Journey to Ireland", subtitle: "My first blog", paragraphs: paragraphs, target: 0,
+                budget: 20_000)
             let started = ContinuousClock.now
             let reply: String
             do {
@@ -57,7 +72,8 @@ struct EvaluationTests {
             var shown: [NSRange] = []
             for raw in SuggestionVerifier.parse(reply) ?? [] {
                 if case .shown(_, let range) = SuggestionVerifier.verify(
-                    raw, paragraph: fixture.paragraph, paragraphStart: 0, code: [], shown: shown) {
+                    raw, paragraph: fixture.paragraph, paragraphStart: 0, code: [], shown: shown)
+                {
                     shown.append(range)
                     survivors.append(raw)
                 }
@@ -74,7 +90,9 @@ struct EvaluationTests {
             if let expected = fixture.expected {
                 let hit = (fixed as String).contains(expected)
                 if hit { caught += 1 }
-                print("EVAL \(hit ? "caught" : "missed") \(expected) in \(elapsed): \(survivors.map { "\($0.original) -> \($0.replacement)" })")
+                print(
+                    "EVAL \(hit ? "caught" : "missed") \(expected) in \(elapsed): \(survivors.map { "\($0.original) -> \($0.replacement)" })"
+                )
             } else {
                 falsePositives = survivors.count
                 print("EVAL clean paragraph produced \(survivors.count) suggestions in \(elapsed)")

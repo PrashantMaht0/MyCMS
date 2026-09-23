@@ -1,7 +1,11 @@
 import Foundation
 import GRDB
 
-// The whole schema. v1 is rewritten rather than appended to while the app has never shipped.
+/// The whole database schema, as one registered migration.
+///
+/// v1 is rewritten rather than appended to while the app has never shipped, so there is one
+/// definition to read rather than a chain of deltas. Creates documents plus its child tables
+/// (revisions, assets, ai_suggestions, publishes, settings) and the full text search index.
 nonisolated enum Migrations {
     static var migrator: DatabaseMigrator {
         var migrator = DatabaseMigrator()
@@ -51,7 +55,8 @@ nonisolated enum Migrations {
 
     // Spec 0005 D. The history panel always reads one document newest first.
     private static func indexRevisionsByTime(_ db: GRDB.Database) throws {
-        try db.create(index: "revisions_on_document_created_at", on: "revisions", columns: ["document_id", "created_at"])
+        try db.create(
+            index: "revisions_on_document_created_at", on: "revisions", columns: ["document_id", "created_at"])
     }
 
     private static func createDocuments(_ db: GRDB.Database) throws {

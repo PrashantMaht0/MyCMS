@@ -7,9 +7,13 @@ enum OutsideChangeResolution: Sendable {
     case keepMine
 }
 
-// Decides what the window shows after the health check: setup, a repair screen, or the library.
-// Also owns the background scan that keeps the library honest about the repo.
+/// Which screen the app is on at launch: still loading, first run setup, the repair screen, or the
+/// library.
+///
+/// It also owns the background scan that runs after the library opens, so reading the repository
+/// never holds up the window, and the resolution when a file changed outside the app.
 @MainActor @Observable final class SetupModel {
+    // Which screen the window shows, decided once the launch checks have run.
     enum Stage: Equatable {
         case loading
         case needsSetup
@@ -62,7 +66,8 @@ enum OutsideChangeResolution: Sendable {
             state.repository = refreshed
             stage = .ready
         } catch let error as RepositoryError {
-            Loggers.repository.error("Recorded repository no longer usable: \(error.localizedDescription, privacy: .public)")
+            Loggers.repository.error(
+                "Recorded repository no longer usable: \(error.localizedDescription, privacy: .public)")
             stage = .needsRepair(error.localizedDescription, path: state.repository?.path)
         } catch {
             stage = .needsRepair(error.localizedDescription, path: state.repository?.path)
@@ -106,7 +111,10 @@ enum OutsideChangeResolution: Sendable {
     // Runs after the library has opened, so disk work never holds up the window. It imports as
     // well as compares, because a file added to the repo by hand has to arrive on its own.
     func scan() async {
-        guard let repo = state.repository, !isScanning else { return }
+        guard let repo = state.repository, !isScanning else {
+            if state.repository == nil { Loggers.repository.info("Launch scan skipped: no repository recorded") }
+            return
+        }
         isScanning = true
         defer { isScanning = false }
 

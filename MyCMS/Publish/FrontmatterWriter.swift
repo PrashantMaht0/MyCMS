@@ -1,8 +1,12 @@
 import Foundation
 import Yams
 
-// AC-39. A document as the site's schema wants it: YAML frontmatter from the same Frontmatter type
-// the importer reads with, then the body exactly as stored.
+/// Turns a document into the exact file the site reads: YAML frontmatter, then the Markdown body.
+///
+/// Writes project only fields for projects and drops them for posts, always writes `tech` for a
+/// project (an empty list when there is none), and quotes anything YAML would otherwise
+/// misread. The bytes it returns are hashed as `published_hash`, which is how the app later
+/// notices a file changed outside the app.
 nonisolated enum FrontmatterWriter {
     static func frontmatter(for document: Document, publishDate: Date, updatedDate: Date?) -> Frontmatter {
         let fields = document.fields

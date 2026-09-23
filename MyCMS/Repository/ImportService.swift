@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import OSLog
 
 // What an import did, and the line the setup screen shows for it.
@@ -41,21 +42,31 @@ nonisolated struct ImportReport: Sendable {
     }
 }
 
-// Turns what the scanner found into rows, in one transaction, without touching the repo.
+/// Turns what the scanner found into database rows, in one transaction, without touching the repo.
+///
+/// `run` imports every file the app does not know yet; `refresh` does the same and hands back the
+/// findings so a caller that also needs the badges does not scan twice. It runs on every launch,
+/// not just the first, because a file you added by hand has to arrive on its own. After the rows
+/// land it adopts each post's pictures into the app's own store, so nothing depends on the repo
+/// staying where it is.
 nonisolated struct ImportService: Sendable {
     private let store: DocumentStore
     private let settings: SettingsStore
     private let scanner: ContentScanner
+    // Nil only in tests that exercise rows alone; the app always passes its store.
+    private let assets: AssetStore?
     private let now: @Sendable () -> Date
 
     init(
         store: DocumentStore,
         settings: SettingsStore,
+        assets: AssetStore? = nil,
         scanner: ContentScanner = ContentScanner(),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.store = store
         self.settings = settings
+        self.assets = assets
         self.scanner = scanner
         self.now = now
     }
@@ -71,14 +82,71 @@ nonisolated struct ImportService: Sendable {
         try refresh(repo: repo).report
     }
 
-    // The findings come back too, so a caller that also needs the badges does not scan twice.
-    // This runs on every launch, not just the first, because a file you added by hand has to
-    // arrive on its own.
+    // Returns the findings too, so a caller needing the badges does not scan twice. Runs on every
+    // launch, because a file you added by hand has to arrive on its own.
     func refresh(repo: URL) throws -> (report: ImportReport, findings: [ScanFinding]) {
         let findings = try scan(repo: repo)
         let report = try apply(findings)
+        adoptPublishedPictures(repo: repo)
         try settings.setDate(now(), forKey: SettingsKey.scanLastRunAt)
         return (report, findings)
+    }
+
+    // MARK: Adopting pictures
+
+    // Spec 0006 C, AC-17. Every document that is or was published, which covers what this import
+    // just added. Stored names are skipped before any file is read, so a repeat pass is cheap.
+    private func adoptPublishedPictures(repo: URL) {
+        let documents: [Document]
+        do {
+            documents = try store.read { db in
+                try Document.filter(Column("published_slug") != nil).fetchAll(db)
+            }
+        } catch {
+            Loggers.repository.error("Picture adoption skipped: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+
+        let adopted = documents.reduce(0) { $0 + adoptPictures(for: $1, repo: repo) }
+        if adopted > 0 {
+            Loggers.repository.info("Adopted \(adopted, privacy: .public) picture(s) from the repo")
+        }
+    }
+
+    // Copies each picture under the document's own asset folder into the app. A reference with no
+    // file in the repo stays as it is, and a failure on one picture never stops the rest.
+    @discardableResult
+    func adoptPictures(for document: Document, repo: URL) -> Int {
+        guard let assets, let slug = document.publishedSlug ?? document.slug else { return 0 }
+        let prefix = "../../assets/\(document.collection.rawValue)/\(slug)/"
+
+        let structure = MarkdownRenderer.parse(document.bodyMd)
+        var references = structure.images
+            .filter { $0.source.hasPrefix(prefix) && !structure.isCode(at: $0.range.location) }
+            .map { (source: $0.source, alt: $0.alt) }
+        if let cover = document.cover, cover.hasPrefix(prefix) {
+            references.append((cover, document.coverAlt))
+        }
+
+        let stored = Set(((try? assets.assets(for: document)) ?? []).map(\.fileName))
+        var seen = Set<String>()
+        var count = 0
+        for reference in references {
+            guard let name = AssetStore.fileName(inReference: reference.source, collection: document.collection),
+                !stored.contains(name), seen.insert(name).inserted,
+                let file = AssetStore.repoFile(for: reference.source, collection: document.collection, repo: repo)
+            else { continue }
+
+            do {
+                if try assets.adopt(repoFile: file, fileName: name, alt: reference.alt, for: document) != nil {
+                    count += 1
+                }
+            } catch {
+                Loggers.repository.error(
+                    "Could not adopt \(name, privacy: .private): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        return count
     }
 
     func apply(_ findings: [ScanFinding]) throws -> ImportReport {
@@ -131,7 +199,8 @@ nonisolated struct ImportService: Sendable {
         try store.apply(plan, at: timestamp)
 
         Loggers.repository.info(
-            "Import ran: \(report.importedTotal, privacy: .public) imported, \(report.skipped.count, privacy: .public) skipped")
+            "Import ran: \(report.importedTotal, privacy: .public) imported, \(report.skipped.count, privacy: .public) skipped"
+        )
         return report
     }
 

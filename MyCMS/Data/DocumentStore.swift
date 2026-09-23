@@ -1,7 +1,13 @@
 import Foundation
 import GRDB
 
-// Everything the app does to documents. Holds the shared connection, never its own.
+/// Everything the app does to documents: create, read, list, search, update, delete.
+///
+/// Holds the shared `Database`, never its own file. Writes go through `update(id:_:)` with typed
+/// column assignments, which also stamps `updated_at`. Throws `DataError.notFound` for an id that
+/// is gone, `.slugTaken` when two documents in one collection claim a slug, and
+/// `.publishedCannotBeDeleted` when a delete would remove something live on the site.
+/// `observeList` streams list rows to the library on the main queue.
 nonisolated struct DocumentStore: Sendable {
     private let database: Database
     private let now: @Sendable () -> Date
@@ -87,7 +93,8 @@ nonisolated struct DocumentStore: Sendable {
         return try database.read { db in
             for attempt in 1...100 {
                 let candidate = SlugRule.candidate(base, attempt: attempt)
-                let taken = try Document
+                let taken =
+                    try Document
                     .filter(Column("collection") == collection.rawValue)
                     .filter(Column("slug") == candidate)
                     .filter(Column("id") != id.uuidString)
@@ -98,25 +105,41 @@ nonisolated struct DocumentStore: Sendable {
         }
     }
 
+    // Spec 0006 A, AC-8. An exact match only, so a taken slug is refused rather than suffixed.
+    func isSlugTaken(_ slug: String, in collection: Document.Collection, except id: UUID) throws -> Bool {
+        try database.read { db in
+            try Document
+                .filter(Column("collection") == collection.rawValue)
+                .filter(Column("slug") == slug)
+                .filter(Column("id") != id.uuidString)
+                .fetchCount(db) > 0
+        }
+    }
+
     func search(_ query: String) throws -> [DocumentListItem] {
         guard let pattern = FTS5Pattern(matchingAllTokensIn: query) else { return [] }
 
         return try database.read { db in
-            try DocumentListItem.fetchAll(db, sql: """
-                SELECT \(DocumentListItem.selection)
-                FROM documents
-                JOIN documents_fts ON documents_fts.rowid = documents.rowid
-                WHERE documents_fts MATCH ?
-                ORDER BY documents.updated_at DESC
-                """, arguments: [pattern])
+            try DocumentListItem.fetchAll(
+                db,
+                sql: """
+                    SELECT \(DocumentListItem.selection)
+                    FROM documents
+                    JOIN documents_fts ON documents_fts.rowid = documents.rowid
+                    WHERE documents_fts MATCH ?
+                    ORDER BY documents.updated_at DESC
+                    """, arguments: [pattern])
         }
     }
 
     // The child rows go with it, by SQLite cascade rather than by anything written here.
+    // Spec 0006 A, AC-7. Only a draft; a live post has to be unpublished first.
     func delete(id: UUID) throws {
         try database.write { db in
-            let deleted = try Document.filter(Column("id") == id.uuidString).deleteAll(db)
-            guard deleted > 0 else { throw DataError.notFound }
+            let row = Document.filter(Column("id") == id.uuidString)
+            guard let state = try String.fetchOne(db, row.select(Column("state"))) else { throw DataError.notFound }
+            guard state != Document.State.published.rawValue else { throw DataError.publishedCannotBeDeleted }
+            _ = try row.deleteAll(db)
         }
     }
 

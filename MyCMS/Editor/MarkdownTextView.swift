@@ -29,7 +29,10 @@ struct MarkdownTextView: NSViewRepresentable {
         textView.isGrammarCheckingEnabled = true
         textView.allowsUndo = true
         textView.drawsBackground = false
-        textView.textContainerInset = NSSize(width: Broadsheet.Space.x2, height: Broadsheet.Space.x4)
+        // The glyphs start on the same edge as the title and fields above, which sit at x6.
+        textView.textContainerInset = NSSize(
+            width: Broadsheet.Space.x6 - (textView.textContainer?.lineFragmentPadding ?? 0), height: Broadsheet.Space.x4
+        )
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]

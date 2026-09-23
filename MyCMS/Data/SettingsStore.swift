@@ -1,7 +1,11 @@
 import Foundation
 import GRDB
 
-// The key and value table from spec 0002, typed. Every setting the app keeps lives here.
+/// The key and value table, typed: strings, dates, and `Codable` values as JSON.
+///
+/// Every setting the app keeps lives here, under a name from `SettingsKey`. A read of a missing
+/// key is nil, not an error, and a row that will not decode reads as absent rather than throwing,
+/// so a hand edited value can never stop the app launching.
 nonisolated struct SettingsStore: Sendable {
     private let database: Database
 

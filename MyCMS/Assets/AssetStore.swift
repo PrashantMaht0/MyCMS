@@ -5,8 +5,14 @@ import ImageIO
 import OSLog
 import UniformTypeIdentifiers
 
-// Spec 0005 A, the one image pipeline: copy in, cap, hash, record, resolve, and forget the unused.
-// Files live under the document's id, so a slug change rewrites paths and never moves a file.
+/// The one picture pipeline: copy in, cap, hash, record, resolve, and forget the unused.
+///
+/// Files live under the document's id in Application Support, so changing a slug rewrites Markdown
+/// paths and never moves a file. `store` caps the long edge at 2000 pixels and re-encodes HEIC as
+/// JPEG; `adopt` copies a picture out of the site repo byte for byte, keeping its name.
+/// `resolve` answers where a Markdown reference points, and is the only source display and
+/// publishing read. Throws `AssetError` for an unsupported format, a failed copy, or an untitled
+/// draft.
 nonisolated struct AssetStore: Sendable {
     // Notes 5.3. Astro builds its own WebP from whatever this leaves, so bigger is only waste.
     static let maxLongEdge = 2000
@@ -76,6 +82,53 @@ nonisolated struct AssetStore: Sendable {
         try store(fileURL: fileURL, for: document)
     }
 
+    // Spec 0006 C, AC-17 and AC-18. A repo picture comes in under its own name with its bytes
+    // untouched, so the body path stays valid. Nil when that name is already stored for the document.
+    @discardableResult
+    func adopt(repoFile: URL, fileName: String, alt: String, for document: Document) throws -> Asset? {
+        let data: Data
+        do {
+            data = try Data(contentsOf: repoFile)
+        } catch {
+            throw AssetError.copyFailed(name: fileName, underlying: error)
+        }
+        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+
+        // A same named file with other bytes is the app's own newer copy, and it wins.
+        if let stored = try assets(for: document).first(where: { $0.fileName == fileName }) {
+            if stored.sha256 != hash {
+                Loggers.assets.notice("Kept the app's own \(fileName, privacy: .private) over the repo's")
+            }
+            return nil
+        }
+
+        let header = try Self.header(data, name: fileName)
+        let folder = root.appending(path: document.id.uuidString)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try data.write(to: folder.appending(path: fileName), options: .atomic)
+        } catch {
+            throw AssetError.copyFailed(name: fileName, underlying: error)
+        }
+
+        var asset = Asset(
+            documentId: document.id,
+            fileName: fileName,
+            storedPath: "\(document.id.uuidString)/\(fileName)",
+            sha256: hash,
+            alt: alt,
+            createdAt: Date(),
+            width: header.width,
+            height: header.height)
+
+        asset.id = try database.write { db in
+            try asset.insert(db)
+            return db.lastInsertedRowID
+        }
+        Loggers.assets.info("Adopted \(fileName, privacy: .private) from the repo")
+        return asset
+    }
+
     func setAlt(_ alt: String, for id: Int64) throws {
         try database.write { db in
             try db.execute(sql: "UPDATE assets SET alt = ? WHERE id = ?", arguments: [alt, id])
@@ -124,11 +177,13 @@ nonisolated struct AssetStore: Sendable {
         return try? assets(for: document).first { $0.fileName == fileName }
     }
 
-    // A picture a post imported from your site already has in the repo, read only, and never from
-    // anywhere outside src/assets. Nil for a path that would escape that folder.
+    // Where adoption reads a picture from, read only, and never from anywhere outside src/assets.
+    // Nil for a path that would escape that folder.
     static func repoFile(for reference: String, collection: Document.Collection, repo: URL) -> URL? {
         guard !reference.contains("://") else { return nil }
-        let allowed = repo.appending(path: "src/assets").standardizedFileURL.path(percentEncoded: false)
+        // An existing folder's path ends in a slash, so it is trimmed before the one below is added.
+        var allowed = repo.appending(path: "src/assets").standardizedFileURL.path(percentEncoded: false)
+        while allowed.hasSuffix("/") { allowed.removeLast() }
         let file = repo.appending(path: "src/content/\(collection.rawValue)")
             .appending(path: reference.removingPercentEncoding ?? reference)
             .standardizedFileURL
@@ -219,7 +274,8 @@ nonisolated struct AssetStore: Sendable {
         var candidate = name
         var suffix = 2
         while taken.contains(candidate)
-            || FileManager.default.fileExists(atPath: folder.appending(path: candidate).path(percentEncoded: false)) {
+            || FileManager.default.fileExists(atPath: folder.appending(path: candidate).path(percentEncoded: false))
+        {
             candidate = "\(base)-\(suffix).\(ext)"
             suffix += 1
         }
@@ -255,23 +311,7 @@ nonisolated struct AssetStore: Sendable {
     // Kept byte for byte when already small enough; otherwise redrawn at the cap. HEIC is always
     // redrawn as JPEG, because a browser cannot show it.
     private static func prepare(_ data: Data, name: String) throws -> Prepared {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-            let typeID = CGImageSourceGetType(source) as String?,
-            let type = UTType(typeID),
-            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-            let rawWidth = properties[kCGImagePropertyPixelWidth] as? Int,
-            let rawHeight = properties[kCGImagePropertyPixelHeight] as? Int
-        else { throw AssetError.unsupportedFormat(name: name) }
-
-        let accepted: [UTType] = [.png, .jpeg, .gif, .webP, .heic, .heif]
-        guard accepted.contains(where: { type.conforms(to: $0) }) else {
-            throw AssetError.unsupportedFormat(name: name)
-        }
-
-        // EXIF orientations 5 to 8 turn the picture on its side, so what you see swaps the two.
-        let orientation = properties[kCGImagePropertyOrientation] as? Int ?? 1
-        let (width, height) = orientation >= 5 ? (rawHeight, rawWidth) : (rawWidth, rawHeight)
-        let isHEIC = type.conforms(to: .heic) || type.conforms(to: .heif)
+        let (source, type, width, height, isHEIC) = try header(data, name: name)
 
         if max(width, height) <= maxLongEdge, !isHEIC {
             return Prepared(
@@ -301,5 +341,29 @@ nonisolated struct AssetStore: Sendable {
         return Prepared(
             data: encoded as Data, width: image.width, height: image.height,
             fileExtension: output.preferredFilenameExtension ?? "jpg")
+    }
+
+    // Reads the type and the size a viewer sees, refusing anything the site cannot show.
+    private static func header(_ data: Data, name: String) throws -> (
+        source: CGImageSource, type: UTType, width: Int, height: Int, isHEIC: Bool
+    ) {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+            let typeID = CGImageSourceGetType(source) as String?,
+            let type = UTType(typeID),
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+            let rawWidth = properties[kCGImagePropertyPixelWidth] as? Int,
+            let rawHeight = properties[kCGImagePropertyPixelHeight] as? Int
+        else { throw AssetError.unsupportedFormat(name: name) }
+
+        let accepted: [UTType] = [.png, .jpeg, .gif, .webP, .heic, .heif]
+        guard accepted.contains(where: { type.conforms(to: $0) }) else {
+            throw AssetError.unsupportedFormat(name: name)
+        }
+
+        // EXIF orientations 5 to 8 turn the picture on its side, so what you see swaps the two.
+        let orientation = properties[kCGImagePropertyOrientation] as? Int ?? 1
+        let (width, height) = orientation >= 5 ? (rawHeight, rawWidth) : (rawWidth, rawHeight)
+        let isHEIC = type.conforms(to: .heic) || type.conforms(to: .heif)
+        return (source, type, width, height, isHEIC)
     }
 }

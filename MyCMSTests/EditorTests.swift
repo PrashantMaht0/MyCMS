@@ -1,11 +1,11 @@
 import Foundation
 import GRDB
 import Testing
+
 @testable import MyCMS
 
-// A fixed sleep racing a debounce is why these tests used to fail at random on a loaded
-// machine. This waits for the condition instead, so the timeout only matters when something
-// is genuinely broken, never when the machine is merely busy.
+// Waits for the condition instead of a fixed sleep, which raced the debounce on a busy machine.
+// The timeout only matters when something is genuinely broken.
 @MainActor
 func eventually(
     _ description: @autoclosure () -> String = "condition",
@@ -25,8 +25,9 @@ func eventually(
 struct SlugRuleTests {
     @Test("A title becomes a path segment")
     func derivesSlug() {
-        #expect(SlugRule.derive(from: "A newbie experience of reading books")
-            == "a-newbie-experience-of-reading-books")
+        #expect(
+            SlugRule.derive(from: "A newbie experience of reading books")
+                == "a-newbie-experience-of-reading-books")
         #expect(SlugRule.derive(from: "Hello, World!") == "hello-world")
         #expect(SlugRule.derive(from: "  Kayaking   in   winter  ") == "kayaking-in-winter")
     }
@@ -149,9 +150,8 @@ struct AutosaveTests {
         #expect(stored?.slug == "a-newbie-experience-of-reading-books")
     }
 
-    // This is the regression guard for the flaky suite. The debounce here is deliberately
-    // longer than the fixed 200ms wait these tests used to use, so the old approach would
-    // fail this every time and the polling one cannot.
+    // Regression guard for the flaky suite: this debounce outlasts the old fixed 200ms wait,
+    // so the old approach fails here every time and polling cannot.
     @Test("A debounce slower than any fixed wait still settles")
     func slowDebounceStillSettles() async throws {
         let database = try MyCMS.Database.inMemory()

@@ -1,8 +1,7 @@
 import Foundation
 import GRDB
 
-// The five tables that exist now and get their store methods in the feature that owns them:
-// publishes in feature 7, ai_suggestions in 9, assets in 13, revisions in 14, settings in 21.
+// Child tables, each with its store in its own feature (publishes 7, suggestions 9, assets 13, revisions 14).
 // Each writes document_id as text by hand, so the foreign key matches documents.id and cascades.
 
 // A snapshot of the whole document minus the body, taken on publish, before a rewrite, or while editing.
@@ -111,14 +110,4 @@ nonisolated struct Publish: DatabaseRecord, Identifiable, Equatable {
         container["error"] = error
         container["created_at"] = createdAt
     }
-}
-
-// One preference. Feature 21 puts the real reading and writing on top of this.
-nonisolated struct Setting: DatabaseRecord, Identifiable, Equatable {
-    static let databaseTableName = "settings"
-
-    var key: String
-    var value: String
-
-    var id: String { key }
 }

@@ -3,6 +3,7 @@ import GRDB
 import ImageIO
 import Testing
 import UniformTypeIdentifiers
+
 @testable import MyCMS
 
 private func pngData(width: Int, height: Int) throws -> Data {
@@ -43,7 +44,8 @@ struct AssetStoreTests {
     @Test("A 4000 pixel picture is stored at 2000 on its long edge and recorded, which is AC-9")
     func capsAndRecords() throws {
         let (store, _, document, _) = try fixture()
-        let asset = try store.store(data: pngData(width: 4000, height: 1000), suggestedName: "Big Photo.png", for: document)
+        let asset = try store.store(
+            data: pngData(width: 4000, height: 1000), suggestedName: "Big Photo.png", for: document)
 
         #expect(asset.id != nil)
         #expect(asset.width == 2000)
@@ -177,7 +179,8 @@ struct ImageSessionTests {
         session.title = "Old Title"
         await session.flush()
 
-        let asset = try store.store(data: pngData(width: 10, height: 10), suggestedName: "pic.png", for: session.document)
+        let asset = try store.store(
+            data: pngData(width: 10, height: 10), suggestedName: "pic.png", for: session.document)
         let oldPath = AssetStore.markdownPath(fileName: asset.fileName, collection: .blog, slug: "old-title")
         session.body = "Intro mentions old-title in prose.\n\n![a pic](\(oldPath))\n"
         session.setCover(oldPath, alt: "cover")
@@ -210,5 +213,182 @@ struct ImageSessionTests {
         session.body = "No picture any more.\n"
         await session.flush()
         #expect(try store.assets(for: document).isEmpty)
+    }
+}
+
+// Spec 0006 C. A repo on disk with one imported post and its pictures, so adoption runs for real.
+@MainActor
+private struct ImportedRepo {
+    let url = URL.temporaryDirectory.appending(path: "mycms-adopt-\(UUID().uuidString)")
+    let pictures: [String: Data]
+
+    init(body: String, cover: String? = nil, pictures: [String: Data]) throws {
+        self.pictures = pictures
+        let content = url.appending(path: "src/content/blog")
+        let assets = url.appending(path: "src/assets/blog/trip")
+        try FileManager.default.createDirectory(at: content, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: url.appending(path: "src/content/projects"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
+        for (name, data) in pictures { try data.write(to: assets.appending(path: name)) }
+
+        let coverLines = cover.map { "cover: \($0)\ncoverAlt: The cliffs\n" } ?? ""
+        let file =
+            "---\ntitle: Trip\ndescription: A trip.\npublishDate: 2026-09-10\ndraft: false\n\(coverLines)---\n\n\(body)"
+        try Data(file.utf8).write(to: content.appending(path: "trip.md"))
+    }
+
+    // Every file under the repo with its bytes, so a test can prove nothing was touched.
+    func snapshot() throws -> [String: Data] {
+        let files =
+            FileManager.default.enumerator(at: url, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL }.filter { !$0.hasDirectoryPath } ?? []
+        return try Dictionary(
+            uniqueKeysWithValues: files.map { ($0.path(percentEncoded: false), try Data(contentsOf: $0)) })
+    }
+
+    func remove() { try? FileManager.default.removeItem(at: url) }
+}
+
+@Suite("Adopting imported pictures")
+@MainActor
+struct AdoptionTests {
+    private func make() throws -> (ImportService, AssetStore, DocumentStore, SettingsStore, URL) {
+        let database = try MyCMS.Database.inMemory()
+        let documents = DocumentStore(database: database)
+        let settings = SettingsStore(database: database)
+        let root = FileManager.default.temporaryDirectory.appending(path: "assets-\(UUID().uuidString)")
+        let assets = AssetStore(database: database, root: root)
+        return (ImportService(store: documents, settings: settings, assets: assets), assets, documents, settings, root)
+    }
+
+    private func imported(_ documents: DocumentStore) throws -> Document {
+        let item = try #require(try documents.list().first { $0.slug == "trip" })
+        return try #require(try documents.fetch(id: item.id))
+    }
+
+    @Test("Import copies each repo picture byte for byte under its own name with its alt, per AC-17")
+    func importAdopts() throws {
+        let big = try pngData(width: 3000, height: 1000)
+        let repo = try ImportedRepo(
+            body:
+                "![Harbour](../../assets/blog/trip/harbour.png)\n\n![Big one](../../assets/blog/trip/Big%20One.png)\n",
+            cover: "../../assets/blog/trip/cover.png",
+            pictures: [
+                "harbour.png": try pngData(width: 300, height: 200), "Big One.png": big,
+                "cover.png": try pngData(width: 40, height: 20),
+            ])
+        defer { repo.remove() }
+        let (importer, assets, documents, _, root) = try make()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try importer.run(repo: repo.url)
+        let document = try imported(documents)
+        let stored = try assets.assets(for: document)
+
+        #expect(Set(stored.map(\.fileName)) == ["harbour.png", "Big One.png", "cover.png"])
+        let bigRow = try #require(stored.first { $0.fileName == "Big One.png" })
+        #expect(try Data(contentsOf: assets.fileURL(for: bigRow)) == big)
+        #expect(bigRow.width == 3000 && bigRow.height == 1000)
+        #expect(bigRow.alt == "Big one")
+        #expect(bigRow.sha256 == ContentHash.sha256(big))
+        #expect(stored.first { $0.fileName == "cover.png" }?.alt == "The cliffs")
+        #expect(assets.resolve(reference: "../../assets/blog/trip/harbour.png", for: document) != nil)
+    }
+
+    @Test("A second pass adds nothing and the repo is never modified, per AC-18")
+    func idempotentAndReadOnly() throws {
+        let repo = try ImportedRepo(
+            body: "![Harbour](../../assets/blog/trip/harbour.png)\n",
+            pictures: ["harbour.png": try pngData(width: 300, height: 200)])
+        defer { repo.remove() }
+        let (importer, assets, documents, _, root) = try make()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let before = try repo.snapshot()
+        try importer.run(repo: repo.url)
+        try importer.run(repo: repo.url)
+        let document = try imported(documents)
+
+        #expect(try assets.assets(for: document).count == 1)
+        #expect(importer.adoptPictures(for: document, repo: repo.url) == 0)
+        #expect(try repo.snapshot() == before)
+    }
+
+    @Test("The launch pass picks up a published document imported before adoption existed, per AC-17")
+    func launchPassCatchesUp() throws {
+        let repo = try ImportedRepo(
+            body: "![Harbour](../../assets/blog/trip/harbour.png)\n",
+            pictures: ["harbour.png": try pngData(width: 300, height: 200)])
+        defer { repo.remove() }
+        let (importer, assets, documents, settings, root) = try make()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // An importer without a store stands in for a build from before this change.
+        try ImportService(store: documents, settings: settings).run(repo: repo.url)
+        let document = try imported(documents)
+        #expect(try assets.assets(for: document).isEmpty)
+
+        _ = try importer.refresh(repo: repo.url)
+        #expect(try assets.assets(for: document).count == 1)
+    }
+
+    @Test("Moving the repo away still shows adopted pictures, per AC-19")
+    func previewSurvivesTheRepo() throws {
+        let repo = try ImportedRepo(
+            body: "![Harbour](../../assets/blog/trip/harbour.png)\n",
+            pictures: ["harbour.png": try pngData(width: 300, height: 200)])
+        let (importer, assets, documents, settings, root) = try make()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try importer.run(repo: repo.url)
+        let document = try imported(documents)
+        try settings.set(repo.url.path(percentEncoded: false), forKey: SettingsKey.repoPath)
+        repo.remove()
+
+        let model = PreviewModel(settings: settings, assets: assets)
+        #expect(model.imageFile(for: "../../assets/blog/trip/harbour.png", in: document) != nil)
+        #expect(model.page(for: document, body: document.bodyMd, stylesheet: nil).contains("data:image/png;base64,"))
+    }
+
+    @Test("A reference with no repo file is left alone and nothing is stored for it, per AC-20")
+    func missingFileIsSkipped() throws {
+        let repo = try ImportedRepo(
+            body: "![Gone](../../assets/blog/trip/gone.png)\n\n![Here](../../assets/blog/trip/here.png)\n",
+            pictures: ["here.png": try pngData(width: 30, height: 20)])
+        defer { repo.remove() }
+        let (importer, assets, documents, _, root) = try make()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try importer.run(repo: repo.url)
+        let document = try imported(documents)
+
+        #expect(try assets.assets(for: document).map(\.fileName) == ["here.png"])
+        #expect(document.bodyMd.contains("gone.png"))
+    }
+
+    @Test("Adoption reads only inside src/assets, whether or not that folder exists yet")
+    func repoFileIsConfined() throws {
+        let repo = try ImportedRepo(body: "", pictures: ["pic.png": try pngData(width: 4, height: 4)])
+        defer { repo.remove() }
+        try Data([1]).write(to: repo.url.appending(path: "secret.txt"))
+
+        #expect(AssetStore.repoFile(for: "../../assets/blog/trip/pic.png", collection: .blog, repo: repo.url) != nil)
+        #expect(AssetStore.repoFile(for: "../../../secret.txt", collection: .blog, repo: repo.url) == nil)
+        #expect(AssetStore.repoFile(for: "../../assets/blog/trip/nope.png", collection: .blog, repo: repo.url) == nil)
+        #expect(AssetStore.repoFile(for: "https://example.com/a.png", collection: .blog, repo: repo.url) == nil)
+    }
+
+    @Test("An app copy with the same name wins over the repo's different bytes")
+    func appCopyWins() throws {
+        let (store, _, document, root) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let mine = try store.store(data: pngData(width: 30, height: 20), suggestedName: "pic.png", for: document)
+
+        let file = root.appending(path: "repo-pic.png")
+        try pngData(width: 60, height: 40).write(to: file)
+
+        #expect(try store.adopt(repoFile: file, fileName: "pic.png", alt: "", for: document) == nil)
+        #expect(try store.assets(for: document).map(\.sha256) == [mine.sha256])
     }
 }

@@ -31,16 +31,21 @@ struct RootView: View {
             Task { await openLibrary() }
         }
         .alert(
-            "A publish was interrupted",
+            interrupted?.action == .unpublish ? "An unpublish was interrupted" : "A publish was interrupted",
             isPresented: Binding(get: { interrupted != nil }, set: { if !$0 { interrupted = nil } }),
             presenting: interrupted
         ) { pending in
-            Button("Finish publishing") { Task { await recover(pending, finish: true) } }
+            // Spec 0006 A, AC-11. The prompt names the action it would finish.
+            Button(pending.action == .unpublish ? "Finish unpublishing" : "Finish publishing") {
+                Task { await recover(pending, finish: true) }
+            }
             Button("Discard those changes", role: .destructive) { Task { await recover(pending, finish: false) } }
             Button("Decide later", role: .cancel) {}
         } message: { pending in
-            Text("MyCMS stopped part way through a publish. These files in your repository were changed "
-                + "and never committed:\n\n" + pending.dirtyPaths.joined(separator: "\n"))
+            Text(
+                "MyCMS stopped part way through \(pending.action == .unpublish ? "an unpublish" : "a publish"). "
+                    + "These files in your repository were changed and never committed:\n\n"
+                    + pending.dirtyPaths.joined(separator: "\n"))
         }
         .alert(
             "Could not recover the publish",

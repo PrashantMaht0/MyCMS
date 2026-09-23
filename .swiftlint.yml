@@ -1,0 +1,31 @@
+# The house rules from AGENTS.md; the formatting itself belongs to .swift-format.
+included:
+  - MyCMS
+  - MyCMSTests
+
+only_rules:
+  - custom_rules
+
+custom_rules:
+  no_dash_character:
+    name: "No em or en dash"
+    regex: '[\u2013\u2014]'
+    message: "Never use an em dash or an en dash, in code or in comments. Reword, or use a comma or parentheses."
+    severity: error
+  line_comment_too_long:
+    name: "Comment longer than two lines"
+    regex: '^[ \t]*//(?!/)[^\n]*\n[ \t]*//(?!/)[^\n]*\n[ \t]*//(?!/)'
+    match_kinds:
+      - comment
+      - comment.mark
+      - doccomment
+    message: "Plain // comments are one precise line, never more than two. Use /// for documentation."
+    severity: error
+  block_comment_too_long:
+    name: "Block comment longer than two lines"
+    regex: '/\*(?:[^*]|\*(?!/))*?\n(?:[^*]|\*(?!/))*?\n'
+    match_kinds:
+      - comment
+      - doccomment
+    message: "Comments are one precise line, never more than two."
+    severity: error

@@ -1,6 +1,7 @@
 import Foundation
 import GRDB
 import Testing
+
 @testable import MyCMS
 
 // The database check against a real file, in a temporary folder rather than Application Support.
@@ -62,7 +63,8 @@ struct GitClientTests {
     @Test("Surfaces a non zero exit with its standard error text")
     func surfacesCommandFailure() async throws {
         let client = GitClient { _, _, _ in
-            ProcessOutput(status: 128, standardOutput: "", standardError: "fatal: not a git repository", wasTerminated: false)
+            ProcessOutput(
+                status: 128, standardOutput: "", standardError: "fatal: not a git repository", wasTerminated: false)
         }
 
         do {
@@ -103,7 +105,7 @@ struct OllamaClientTests {
         })
 
         let detail = try await client.checkReachable()
-        #expect(detail.contains("localhost:11434"))
+        #expect(detail.contains("127.0.0.1:11434"))
     }
 
     @Test("Reports not reachable when the request fails")
@@ -137,7 +139,7 @@ struct OllamaClientTests {
         })
 
         _ = try await client.checkReachable()
-        #expect(recorder.url?.absoluteString == "http://localhost:11434/api/tags")
+        #expect(recorder.url?.absoluteString == "http://127.0.0.1:11434/api/tags")
     }
 }
 
@@ -175,7 +177,8 @@ struct HealthCheckTests {
             database: MyCMS.Database(url: folder.appending(path: "mycms.sqlite")),
             git: GitClient { _, _, _ in
                 counter.increment()
-                return ProcessOutput(status: 0, standardOutput: "git version 2.50.1", standardError: "", wasTerminated: false)
+                return ProcessOutput(
+                    status: 0, standardOutput: "git version 2.50.1", standardError: "", wasTerminated: false)
             },
             ollama: OllamaClient(fetch: { _ in throw URLError(.cannotConnectToHost) })
         )

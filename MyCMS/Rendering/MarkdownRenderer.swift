@@ -1,7 +1,12 @@
 import Foundation
 import Markdown
 
-// AC-63. The one parser in the app. Every surface that draws Markdown comes through here.
+/// The one Markdown parser, used for three different jobs.
+///
+/// `parse` returns the structure the editor styles with (styled runs, code ranges, image
+/// references, a line index). `html(for:resolvingImages:)` renders the preview and the library
+/// detail pane, asking the caller where each picture lives so the renderer never touches the disk.
+/// Everything is derived from the text; nothing here ever changes it.
 nonisolated enum MarkdownRenderer {
     static func parse(_ text: String) -> MarkdownStructure {
         let lineIndex = LineIndex(text)
@@ -88,7 +93,8 @@ private nonisolated struct SpanCollector: MarkupWalker {
 
     mutating func visitLink(_ link: Link) {
         if let span = span(of: link), first(at: span.location) == Unit.openBracket,
-            let closing = closingBracket(from: span.location, limit: span.upperBound) {
+            let closing = closingBracket(from: span.location, limit: span.upperBound)
+        {
             runs.append(StyledRun(range: span, style: .link))
             runs.append(StyledRun(range: NSRange(location: span.location, length: 1), style: .marker))
             runs.append(
@@ -102,7 +108,8 @@ private nonisolated struct SpanCollector: MarkupWalker {
     // Feature 13 draws the picture. All this does is stop the syntax around it shouting.
     mutating func visitImage(_ image: Markdown.Image) {
         if let span = span(of: image), first(at: span.location) == Unit.bang,
-            let closing = closingBracket(from: span.location + 1, limit: span.upperBound) {
+            let closing = closingBracket(from: span.location + 1, limit: span.upperBound)
+        {
             runs.append(StyledRun(range: NSRange(location: span.location, length: 2), style: .marker))
             runs.append(
                 StyledRun(
@@ -270,7 +277,8 @@ private nonisolated struct SpanCollector: MarkupWalker {
             return
         }
 
-        let opening = indent + hashes
+        let opening =
+            indent + hashes
             + forwardRun(from: span.location + indent + hashes, end: span.upperBound, while: isSpace)
         runs.append(
             StyledRun(range: NSRange(location: span.location, length: opening), style: .marker))

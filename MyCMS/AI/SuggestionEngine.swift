@@ -1,9 +1,14 @@
 import Foundation
 import OSLog
 
-// Spec 0005 B. Checks the paragraphs you changed once you pause, one request at a time, and lets
-// through only what the gate verifies. Nothing here edits text except Accept, through the editor.
+/// Runs grammar and punctuation checks over the paragraphs you have touched, while you keep typing.
+///
+/// It waits for a pause, checks only changed paragraphs, skips any paragraph this model and prompt
+/// already judged, and anchors every suggestion to an exact character range. A suggestion whose
+/// paragraph moves or changes is retired rather than applied at the wrong place. Everything it
+/// proposes has already passed `SuggestionVerifier`.
 @Observable final class SuggestionEngine {
+    // Why the panel is quiet: still checking, ready, not running, or the model is missing.
     enum Availability: Equatable {
         case checking
         case ready(model: String)
@@ -66,7 +71,8 @@ import OSLog
     }
 
     private var delay: Duration {
-        let seconds = ((try? settings.string(forKey: SettingsKey.aiCheckDelaySeconds)) ?? nil).flatMap(Double.init) ?? 1.5
+        let seconds =
+            ((try? settings.string(forKey: SettingsKey.aiCheckDelaySeconds)) ?? nil).flatMap(Double.init) ?? 1.5
         return .milliseconds(Int(max(seconds, 0.2) * 1000))
     }
 
@@ -99,8 +105,10 @@ import OSLog
         let before = NSRange(location: edited.location, length: max(edited.length - delta, 0))
         var kept: [Suggestion] = []
         for var suggestion in suggestions {
-            let touches = suggestion.range.location < before.upperBound && before.location < suggestion.range.upperBound
-                || (before.length == 0 && before.location > suggestion.range.location && before.location < suggestion.range.upperBound)
+            let touches =
+                suggestion.range.location < before.upperBound && before.location < suggestion.range.upperBound
+                || (before.length == 0 && before.location > suggestion.range.location
+                    && before.location < suggestion.range.upperBound)
             if touches {
                 resolve(suggestion, as: .stale)
                 continue
@@ -150,7 +158,9 @@ import OSLog
             guard !checkedHashes.contains(hash) else { continue }
 
             // A paragraph this model and prompt already checked is never asked again.
-            if (try? store.wasChecked(documentID: session.document.id, targetHash: hash, model: model, promptVersion: prompt.version)) == true {
+            if (try? store.wasChecked(
+                documentID: session.document.id, targetHash: hash, model: model, promptVersion: prompt.version)) == true
+            {
                 restore(hash: hash, paragraph: paragraph, body: body)
                 checkedHashes.insert(hash)
                 continue
@@ -186,13 +196,15 @@ import OSLog
 
     // The gate, then the screen. Everything that arrives ends in a logged state.
     private func accept(
-        reply: String, for paragraph: SuggestionContext.Paragraph, hash: String, model: String, prompt: String, latency: Int
+        reply: String, for paragraph: SuggestionContext.Paragraph, hash: String, model: String, prompt: String,
+        latency: Int
     ) {
         let log = { (raw: RawSuggestion, outcome: SuggestionStore.Outcome) -> Int64? in
-            try? self.store.record(AISuggestion(
-                documentId: self.session.document.id, kind: raw.kind, original: raw.original,
-                replacement: raw.replacement, reason: raw.reason, model: model, promptVersion: prompt,
-                latencyMs: latency, outcome: outcome.rawValue, createdAt: Date(), targetHash: hash))
+            try? self.store.record(
+                AISuggestion(
+                    documentId: self.session.document.id, kind: raw.kind, original: raw.original,
+                    replacement: raw.replacement, reason: raw.reason, model: model, promptVersion: prompt,
+                    latencyMs: latency, outcome: outcome.rawValue, createdAt: Date(), targetHash: hash))
         }
         _ = log(RawSuggestion(kind: SuggestionStore.checkMarker, original: "", replacement: "", reason: ""), .shown)
 
@@ -205,28 +217,34 @@ import OSLog
         // AC-26. If the paragraph moved while the request was out, nothing from it applies.
         let live = session.body as NSString
         guard paragraph.range.upperBound <= live.length, live.substring(with: paragraph.range) == paragraph.text else {
-            proposals.forEach { _ = log($0, .stale) }
+            for proposal in proposals { _ = log(proposal, .stale) }
             return
         }
 
         let code = MarkdownRenderer.parse(session.body).codeRanges
         var shown = suggestions.map(\.range)
         for raw in proposals {
-            if (try? store.isDismissed(documentID: session.document.id, targetHash: hash, original: raw.original)) == true {
+            if (try? store.isDismissed(documentID: session.document.id, targetHash: hash, original: raw.original))
+                == true
+            {
                 continue
             }
-            switch SuggestionVerifier.verify(raw, paragraph: paragraph.text, paragraphStart: paragraph.range.location, code: code, shown: shown) {
+            switch SuggestionVerifier.verify(
+                raw, paragraph: paragraph.text, paragraphStart: paragraph.range.location, code: code, shown: shown)
+            {
             case .dropped(let reason):
                 Loggers.ai.info("Dropped a suggestion: \(reason.rawValue, privacy: .public)")
                 _ = log(raw, .dropped)
             case .shown(let kind, let range):
-                let enabled = kind == .punctuation ? flag(SettingsKey.aiPunctuationEnabled) : flag(SettingsKey.aiGrammarEnabled)
+                let enabled =
+                    kind == .punctuation ? flag(SettingsKey.aiPunctuationEnabled) : flag(SettingsKey.aiGrammarEnabled)
                 guard enabled else { continue }
                 shown.append(range)
                 let row = log(raw, .shown)
-                suggestions.append(Suggestion(
-                    id: UUID(), rowID: row, kind: kind, original: raw.original, replacement: raw.replacement,
-                    reason: raw.reason, range: range, targetHash: hash))
+                suggestions.append(
+                    Suggestion(
+                        id: UUID(), rowID: row, kind: kind, original: raw.original, replacement: raw.replacement,
+                        reason: raw.reason, range: range, targetHash: hash))
             }
         }
         suggestions.sort { $0.range.location < $1.range.location }
@@ -234,19 +252,24 @@ import OSLog
 
     // A cache hit brings back what was still waiting, re verified against the text as it is now.
     private func restore(hash: String, paragraph: SuggestionContext.Paragraph, body: String) {
-        guard let rows = try? store.pending(documentID: session.document.id, targetHash: hash, model: model, promptVersion: prompts.grammar.version)
+        guard
+            let rows = try? store.pending(
+                documentID: session.document.id, targetHash: hash, model: model, promptVersion: prompts.grammar.version)
         else { return }
         let code = MarkdownRenderer.parse(body).codeRanges
         var shown = suggestions.map(\.range)
         for row in rows {
-            let raw = RawSuggestion(kind: row.kind, original: row.original, replacement: row.replacement, reason: row.reason)
-            guard case .shown(let kind, let range) = SuggestionVerifier.verify(
-                raw, paragraph: paragraph.text, paragraphStart: paragraph.range.location, code: code, shown: shown)
+            let raw = RawSuggestion(
+                kind: row.kind, original: row.original, replacement: row.replacement, reason: row.reason)
+            guard
+                case .shown(let kind, let range) = SuggestionVerifier.verify(
+                    raw, paragraph: paragraph.text, paragraphStart: paragraph.range.location, code: code, shown: shown)
             else { continue }
             shown.append(range)
-            suggestions.append(Suggestion(
-                id: UUID(), rowID: row.id, kind: kind, original: row.original, replacement: row.replacement,
-                reason: row.reason, range: range, targetHash: hash))
+            suggestions.append(
+                Suggestion(
+                    id: UUID(), rowID: row.id, kind: kind, original: row.original, replacement: row.replacement,
+                    reason: row.reason, range: range, targetHash: hash))
         }
         suggestions.sort { $0.range.location < $1.range.location }
     }

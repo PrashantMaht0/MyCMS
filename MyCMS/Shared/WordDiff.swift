@@ -3,6 +3,7 @@ import Foundation
 // AC-51. What changed between two texts, in words rather than characters, so a one word edit reads
 // as one word and not as a rewritten paragraph.
 nonisolated enum WordDiff {
+    // One stretch of the diff: kept, added, or taken away.
     enum Run: Equatable, Sendable {
         case same(String)
         case inserted(String)

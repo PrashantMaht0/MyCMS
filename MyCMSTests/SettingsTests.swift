@@ -1,6 +1,7 @@
 import Foundation
 import GRDB
 import Testing
+
 @testable import MyCMS
 
 @Suite("Settings")
@@ -63,7 +64,9 @@ struct SettingsTests {
         let database = try MyCMS.Database.inMemory()
         let documents = DocumentStore(database: database)
         let titled = try documents.create(collection: .blog)
-        try documents.update(id: titled.id, [Column("title").set(to: "Hello"), Column("slug").set(to: "hello"), Column("body_md").set(to: "Hi.\n")])
+        try documents.update(
+            id: titled.id,
+            [Column("title").set(to: "Hello"), Column("slug").set(to: "hello"), Column("body_md").set(to: "Hi.\n")])
         let untitled = try documents.create(collection: .projects)
 
         let folder = FileManager.default.temporaryDirectory.appending(path: "export-\(UUID().uuidString)")
@@ -72,6 +75,8 @@ struct SettingsTests {
         let saved = try #require(try documents.fetch(id: titled.id))
         let written = try String(contentsOf: folder.appending(path: "blog/hello.md"), encoding: .utf8)
         #expect(written == (try FrontmatterWriter.serialize(saved, publishDate: saved.createdAt, updatedDate: nil)))
-        #expect(FileManager.default.fileExists(atPath: folder.appending(path: "projects/\(untitled.id.uuidString).md").path(percentEncoded: false)))
+        #expect(
+            FileManager.default.fileExists(
+                atPath: folder.appending(path: "projects/\(untitled.id.uuidString).md").path(percentEncoded: false)))
     }
 }

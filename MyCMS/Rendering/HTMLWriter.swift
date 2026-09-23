@@ -1,8 +1,10 @@
 import Foundation
 import Markdown
 
-// AC-13 and AC-14. Markdown to HTML for the preview and the detail pane. Not swift-markdown's own
-// HTMLFormatter, which escapes nothing and drops alt text, so code showing a tag would become one.
+/// Walks a parsed document and writes the HTML the preview shows.
+///
+/// Escapes everything it emits, resolves each image through the caller's closure, and drops a
+/// picture it cannot resolve to its alt text rather than a broken image.
 nonisolated struct HTMLWriter: MarkupWalker {
     // Maps a Markdown image path to what the page should load; nil drops the picture's source.
     let imageSource: (String) -> String?

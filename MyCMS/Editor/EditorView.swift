@@ -60,7 +60,8 @@ struct EditorView: View {
                         onImages: { incoming in
                             Task { await images.receive(incoming, target: .body(controller.selection)) }
                         },
-                        suggestionRanges: suggestions?.isEnabled == true ? suggestions?.suggestions.map(\.range) ?? [] : [],
+                        suggestionRanges: suggestions?.isEnabled == true
+                            ? suggestions?.suggestions.map(\.range) ?? [] : [],
                         onRewrite: rewritesEnabled ? { showRewrites(for: $0) } : nil)
                     if showsHistory {
                         Divider()
@@ -99,7 +100,11 @@ struct EditorView: View {
             Text(images.errorMessage ?? "")
         }
         .sheet(item: $publishFlow, onDismiss: { session.reloadFromStore() }) { flow in
-            PublishSheet(flow: flow) { publishFlow = nil }
+            PublishSheet(flow: flow) {
+                // AC-9. A moved address reaches the open text before the sheet's reload runs.
+                if let slug = flow.movedTo { session.adoptPublishedAddress(slug) }
+                publishFlow = nil
+            }
         }
         .onChange(of: environment.preferences.fontSize) { _, size in styler.fontSize = CGFloat(size) }
         .onChange(of: environment.preferences.showMarkers) { _, show in styler.showMarkers = show }
@@ -142,9 +147,10 @@ struct EditorView: View {
         let request = RewriteRequest(range: range, original: text.substring(with: range))
         let popover = NSPopover()
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: RewritePopover(request: request) { choice in
-            acceptRewrite(choice, for: request)
-        })
+        popover.contentViewController = NSHostingController(
+            rootView: RewritePopover(request: request) { choice in
+                acceptRewrite(choice, for: request)
+            })
         rewritePopover = popover
         popover.show(relativeTo: controller.rect(for: range), of: anchor, preferredEdge: .maxY)
 
@@ -161,7 +167,7 @@ struct EditorView: View {
     private func acceptRewrite(_ choice: String, for request: RewriteRequest) {
         rewritePopover?.close()
         rewritePopover = nil
-        try? environment.revisions.snapshot(session.document, body: session.body, reason: .beforeAI)
+        _ = try? environment.revisions.snapshot(session.document, body: session.body, reason: .beforeAI)
         guard controller.replace(request.range, expecting: request.original, with: choice) else { return }
         session.markAIAssisted()
     }
@@ -233,21 +239,30 @@ struct EditorView: View {
 
     private var fields: some View {
         VStack(alignment: .leading, spacing: Broadsheet.Space.x2) {
-            TextField("Title", text: Binding(get: { session.title }, set: { session.title = $0 }))
+            TextField("Title", text: Binding(get: { session.title }, set: { session.title = $0 }), axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(Broadsheet.serif(Broadsheet.TypeScale.heading[1], weight: .semibold))
                 .accessibilityLabel("Title")
 
-            TextField("Subtitle", text: Binding(get: { session.subtitle }, set: { session.subtitle = $0 }))
-                .textFieldStyle(.plain)
-                .font(Broadsheet.serif(Broadsheet.TypeScale.heading[4]))
-                .foregroundStyle(Broadsheet.Colors.secondaryText)
-                .accessibilityLabel("Subtitle")
+            TextField(
+                "Subtitle", text: Binding(get: { session.subtitle }, set: { session.subtitle = $0 }), axis: .vertical
+            )
+            .textFieldStyle(.plain)
+            .font(Broadsheet.serif(Broadsheet.TypeScale.heading[4]))
+            .foregroundStyle(Broadsheet.Colors.secondaryText)
+            .accessibilityLabel("Subtitle")
+
+            if session.document.collection == .projects {
+                ProjectDetails(fields: Binding(get: { session.fields }, set: { session.fields = $0 }))
+            }
 
             TagField(tags: Binding(get: { session.tags }, set: { session.tags = $0 }))
 
             coverRow
         }
+        // Never squeezed: a wrapping title would otherwise shrink to nothing; the body gives way instead.
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Broadsheet.Space.x6)
         .padding(.top, Broadsheet.Space.x4)
     }
@@ -262,7 +277,8 @@ struct EditorView: View {
         HStack(spacing: Broadsheet.Space.x2) {
             if let cover = session.cover {
                 if let url = assets.resolve(reference: cover, for: session.document)?.url,
-                    let image = NSImage(contentsOf: url) {
+                    let image = NSImage(contentsOf: url)
+                {
                     Image(nsImage: image)
                         .resizable()
                         .scaledToFill()
@@ -374,7 +390,8 @@ private struct TagField: View {
     }
 
     private func commit() {
-        let tag = draft
+        let tag =
+            draft
             .replacingOccurrences(of: ",", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()

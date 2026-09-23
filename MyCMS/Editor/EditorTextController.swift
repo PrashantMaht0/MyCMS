@@ -1,8 +1,12 @@
 import AppKit
 import Observation
 
-// AC-6 to AC-8. Every toolbar control runs through here, and every edit goes through the text
-// view's own change machinery, which is what keeps undo and redo working.
+/// The bridge between the toolbar and the text view: what the caret is inside, and every formatting
+/// command.
+///
+/// Holds the text view weakly and does nothing when nothing is attached, so a command from a stale
+/// toolbar is a no op rather than a crash. Every edit goes through the text view's own undo, so ⌘Z
+/// behaves as it would for typing.
 @Observable final class EditorTextController {
 
     // AC-7. The page title is already the h1, so the body starts at ## exactly as Notes 5.1 says.
@@ -35,8 +39,6 @@ import Observation
     private(set) var blockStyle: BlockStyle = .normal
 
     @ObservationIgnored private weak var textView: NSTextView?
-
-    var isAttached: Bool { textView != nil }
 
     func attach(_ textView: NSTextView) {
         self.textView = textView
@@ -128,7 +130,9 @@ import Observation
         guard let textView else { return false }
         let text = textView.string as NSString
         guard range.upperBound <= text.length, text.substring(with: range) == original else { return false }
-        replace(range, with: replacement, select: NSRange(location: range.location + (replacement as NSString).length, length: 0))
+        replace(
+            range, with: replacement,
+            select: NSRange(location: range.location + (replacement as NSString).length, length: 0))
         return true
     }
 
@@ -191,7 +195,8 @@ import Observation
             location: selection.location - markerLength, length: selection.length + markerLength * 2)
         if outer.location >= 0, outer.upperBound <= text.length,
             text.substring(with: outer).hasPrefix(marker),
-            text.substring(with: outer).hasSuffix(marker) {
+            text.substring(with: outer).hasSuffix(marker)
+        {
             let inner = text.substring(with: selection)
             replace(
                 outer, with: inner,
@@ -202,7 +207,8 @@ import Observation
         // Or wrapped inside the selection, which is what happens when you select the whole word.
         let selected = text.substring(with: selection)
         if (selected as NSString).length >= markerLength * 2, selected.hasPrefix(marker),
-            selected.hasSuffix(marker) {
+            selected.hasSuffix(marker)
+        {
             let inner = (selected as NSString).substring(
                 with: NSRange(
                     location: markerLength, length: (selected as NSString).length - markerLength * 2))

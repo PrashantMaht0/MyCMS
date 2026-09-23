@@ -1,6 +1,7 @@
 import Foundation
 import GRDB
 import Testing
+
 @testable import MyCMS
 
 // A throwaway repo on disk, so the scanner and the importer are exercised against real files
@@ -220,8 +221,9 @@ struct ImportTests {
         #expect(try store.list().count == 1)
 
         // You wrote this one on GitHub, or by hand, after setup was already finished.
-        try repo.write(blogFile.replacingOccurrences(of: "My Journey to Ireland", with: "Added By Hand"),
-                       to: "blog/second.md")
+        try repo.write(
+            blogFile.replacingOccurrences(of: "My Journey to Ireland", with: "Added By Hand"),
+            to: "blog/second.md")
 
         let run = try importer.refresh(repo: repo.url)
         #expect(run.report.importedTotal == 1)
@@ -400,7 +402,8 @@ struct SettingsStoreTests {
         let database = try MyCMS.Database.inMemory()
         let settings = SettingsStore(database: database)
 
-        let outcome = CheckOutcome.ok("Git 2.50.1 found · can push to origin", at: Date(timeIntervalSince1970: 1_700_000_000))
+        let outcome = CheckOutcome.ok(
+            "Git 2.50.1 found · can push to origin", at: Date(timeIntervalSince1970: 1_700_000_000))
         try settings.encode(outcome, forKey: SettingsKey.checkGit)
 
         let read = try #require(try settings.decode(CheckOutcome.self, forKey: SettingsKey.checkGit))

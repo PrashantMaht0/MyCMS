@@ -1,5 +1,6 @@
 import SwiftUI
 
+// One window, one environment, and the settings scene macOS expects.
 @main struct MyCMSApp: App {
     @State private var environment = AppEnvironment()
 

@@ -1,8 +1,10 @@
 import Foundation
 import OSLog
 
-// AC-34. Prompts are versioned files in the bundle, not strings in code, so every logged
-// suggestion names the exact prompt that produced it.
+/// The prompt files shipped inside the app, read once and addressed by name and version.
+///
+/// The version travels with every suggestion row, so a cached verdict from an older prompt is never
+/// reused for a newer one.
 nonisolated struct PromptLibrary: Sendable {
     struct Prompt: Sendable {
         let text: String
@@ -21,7 +23,8 @@ nonisolated struct PromptLibrary: Sendable {
     }
 
     private static func load(_ name: String, from bundle: Bundle) -> Prompt {
-        let url = bundle.url(forResource: name, withExtension: "md")
+        let url =
+            bundle.url(forResource: name, withExtension: "md")
             ?? bundle.url(forResource: name, withExtension: "md", subdirectory: "Prompts")
         let text = url.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
         if text.isEmpty { Loggers.ai.error("Prompt \(name, privacy: .public) is missing from the bundle") }

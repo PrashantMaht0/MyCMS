@@ -70,15 +70,17 @@ nonisolated enum Broadsheet {
     }
 
     private static func dynamic(light: Int, dark: Int) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
-            NSColor(rgb: appearance.isDark ? dark : light)
-        })
+        Color(
+            nsColor: NSColor(name: nil) { appearance in
+                NSColor(rgb: appearance.isDark ? dark : light)
+            })
     }
 
     private static func dynamicAlpha(light: Int, dark: Int, alpha: CGFloat) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
-            NSColor(rgb: appearance.isDark ? dark : light).withAlphaComponent(alpha)
-        })
+        Color(
+            nsColor: NSColor(name: nil) { appearance in
+                NSColor(rgb: appearance.isDark ? dark : light).withAlphaComponent(alpha)
+            })
     }
 }
 

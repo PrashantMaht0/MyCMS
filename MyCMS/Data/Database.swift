@@ -2,7 +2,12 @@ import Foundation
 import GRDB
 import Synchronization
 
-// Owns the one connection the whole app shares. Every store holds a reference to this, never its own file.
+/// The one SQLite connection the whole app shares, opened once at launch.
+///
+/// Every store takes this by reference and never opens its own file, so writes from the editor,
+/// the publisher and the repo scan all serialise through one queue. `open()` creates the folder,
+/// runs the migrations and turns foreign keys on; it throws `DataError` with the resolved path,
+/// which the failure screen shows. `inMemory()` is for tests.
 nonisolated final class Database: Sendable {
     let url: URL
 
@@ -15,7 +20,8 @@ nonisolated final class Database: Sendable {
 
     // Application Support is not gated by privacy consent, so this path needs no prompt.
     static var defaultURL: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        let base =
+            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL.homeDirectory.appending(path: "Library/Application Support")
         let identifier = Bundle.main.bundleIdentifier ?? "com.prashantmahto.MyCMS"
         return base.appending(path: identifier).appending(path: "mycms.sqlite")

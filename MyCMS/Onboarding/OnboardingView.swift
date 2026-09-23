@@ -74,7 +74,9 @@ struct OnboardingView: View {
                 if repo.wasDirtyAtSetup {
                     StatusLine(
                         state: .note,
-                        text: "That repo has uncommitted changes. Fine for now; publishing will ask you to deal with them.")
+                        text:
+                            "That repo has uncommitted changes. Fine for now; publishing will ask you to deal with them."
+                    )
                 }
             }
 
@@ -155,7 +157,9 @@ struct OnboardingView: View {
                 ForEach(report.renamed, id: \.id) { rename in
                     StatusLine(
                         state: .note,
-                        text: "Your draft at \(rename.from) moved to \(rename.to), because the published file keeps that slug.")
+                        text:
+                            "Your draft at \(rename.from) moved to \(rename.to), because the published file keeps that slug."
+                    )
                 }
                 ForEach(report.skipped, id: \.path) { skipped in
                     StatusLine(state: .failed, text: "\(skipped.path): \(skipped.reason)")
@@ -290,9 +294,8 @@ private struct StatusLine: View {
     }
 }
 
-// Broadsheet is near square, which is most of why this will not look like default SwiftUI.
-// The secondary form is a border rather than a fill, because Broadsheet's neutral ramp is the
-// stylesheet's light values only and a filled button built on it disappears in dark mode.
+// Near square, like Broadsheet. The secondary form is a border, not a fill, because a fill built on
+// Broadsheet's light only neutral ramp disappears in dark mode.
 private struct PrimaryButton: ButtonStyle {
     var isProminent: Bool
     @Environment(\.isEnabled) private var isEnabled

@@ -1,13 +1,12 @@
 import Foundation
 
-// What a finished git process produced.
+/// What a finished git process produced: status, both streams, and whether it was killed on timeout.
 nonisolated struct ProcessOutput: Sendable {
     let status: Int32
     let standardOutput: String
     let standardError: String
     let wasTerminated: Bool
 
-    var trimmedOutput: String { standardOutput.trimmingCharacters(in: .whitespacesAndNewlines) }
     var trimmedError: String { standardError.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     // What the user is shown when a command fails, always git's own words rather than ours.
@@ -16,7 +15,11 @@ nonisolated struct ProcessOutput: Sendable {
     }
 }
 
-// Failures the publish module reports to the user: running git, and the publish sequence on top.
+/// Everything publishing can refuse or fail on, each carrying the words the user sees.
+///
+/// Preflight refusals (`dirtyOutsideContent`, `wrongBranch`, `pullNotFastForward`), plan refusals
+/// (`validationFailed`, `slugTaken`, `slugInvalid`, `unknownFilesInFolder`, `notPublished`), and
+/// write time failures (`writeFailed`, `pushFailed`, `rollbackIncomplete`).
 nonisolated enum PublishError: LocalizedError {
     case launchFailed(path: String, underlying: Error)
     case timedOut(seconds: Int)
@@ -31,6 +34,10 @@ nonisolated enum PublishError: LocalizedError {
     case pushFailed(gitMessage: String)
     case rollbackIncomplete(paths: [String])
     case nothingChanged
+    case notPublished
+    case unknownFilesInFolder(paths: [String])
+    case slugInvalid(String)
+    case slugTaken(String)
 
     var errorDescription: String? {
         switch self {
@@ -62,11 +69,26 @@ nonisolated enum PublishError: LocalizedError {
             "Publishing failed, and these paths could not be put back as they were:\n" + paths.joined(separator: "\n")
         case .nothingChanged:
             "Nothing a reader would see has changed since the last publish."
+        case .notPublished:
+            "This document is not live on your site, so there is nothing to unpublish."
+        case .unknownFilesInFolder(let paths):
+            "These files sit in the post's picture folder but the app holds no copy of them, so deleting "
+                + "them would lose them. Nothing was written. Move them or add them to the post first:\n"
+                + paths.joined(separator: "\n")
+        case .slugInvalid(let slug):
+            "\(slug.isEmpty ? "An empty address" : "“\(slug)”") is not a valid address. Use lowercase letters, "
+                + "digits and single hyphens, with no hyphen at either end."
+        case .slugTaken(let slug):
+            "Another document in this collection already uses “\(slug)”. Pick a different address."
         }
     }
 }
 
-// Runs the system git. Feature 7 grows this into the real publish client.
+/// Runs the system git at `/usr/bin/git`, so the app never holds a token or talks to GitHub itself.
+///
+/// Every call is scoped to one repository path and times out: local commands quickly, network
+/// commands slower, a push slowest. Output comes back as `ProcessOutput` with git's own words,
+/// which is what every error message shows. Staging is always by explicit path, never `add -A`.
 actor GitClient {
     typealias Run = @Sendable (String, [String], TimeInterval) async throws -> ProcessOutput
 
@@ -286,7 +308,7 @@ actor GitClient {
         let group = DispatchGroup()
         for (handle, isStandardOutput) in [
             (outPipe.fileHandleForReading, true),
-            (errPipe.fileHandleForReading, false)
+            (errPipe.fileHandleForReading, false),
         ] {
             DispatchQueue.global().async(group: group) {
                 let data = (try? handle.readToEnd()) ?? Data()

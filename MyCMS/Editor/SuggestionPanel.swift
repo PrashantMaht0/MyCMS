@@ -79,7 +79,8 @@ struct SuggestionPanel: View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: Broadsheet.Space.x2) {
                 HStack {
-                    Text("\(title) \(items.count)").font(Broadsheet.serif(Broadsheet.TypeScale.uiLarge, weight: .semibold))
+                    Text("\(title) \(items.count)").font(
+                        Broadsheet.serif(Broadsheet.TypeScale.uiLarge, weight: .semibold))
                     Spacer()
                     if kind == .punctuation {
                         Button("Accept all") {
@@ -91,8 +92,9 @@ struct SuggestionPanel: View {
                     }
                 }
                 ForEach(items) { item in
-                    SuggestionRow(suggestion: item, onSelect: { onSelect(item.range) },
-                                  onAccept: { engine.accept(item) }, onDismiss: { engine.dismiss(item) })
+                    SuggestionRow(
+                        suggestion: item, onSelect: { onSelect(item.range) },
+                        onAccept: { engine.accept(item) }, onDismiss: { engine.dismiss(item) })
                 }
             }
         }
@@ -108,9 +110,11 @@ private struct SuggestionRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Broadsheet.Space.x1) {
             Button(action: onSelect) {
-                (Text(suggestion.original).strikethrough().foregroundStyle(Broadsheet.Colors.secondaryText)
-                    + Text("  ") + Text(suggestion.replacement).foregroundStyle(Broadsheet.Colors.text))
-                    .multilineTextAlignment(.leading)
+                Text(
+                    "\(Text(suggestion.original).strikethrough().foregroundStyle(Broadsheet.Colors.secondaryText))  "
+                        + "\(Text(suggestion.replacement).foregroundStyle(Broadsheet.Colors.text))"
+                )
+                .multilineTextAlignment(.leading)
             }
             .buttonStyle(.plain)
             .help("Show it in the text")
@@ -164,7 +168,9 @@ struct RewritePopover: View {
                 Text("The model had nothing different to offer.").foregroundStyle(Broadsheet.Colors.secondaryText)
             case .ready(let options):
                 ForEach(options, id: \.self) { option in
-                    Button { onPick(option) } label: {
+                    Button {
+                        onPick(option)
+                    } label: {
                         Text(option).multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(.bordered)

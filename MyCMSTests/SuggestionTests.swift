@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import MyCMS
 
 private func raw(_ original: String, _ replacement: String, kind: String = "punctuation") -> RawSuggestion {
@@ -12,7 +13,8 @@ struct SuggestionVerifierTests {
 
     @Test("Its to It's survives: 33 percent is over the ratio but under the four character floor, per AC-25")
     func shortFixSurvives() {
-        let verdict = SuggestionVerifier.verify(raw("Its", "It's"), paragraph: paragraph, paragraphStart: 10, code: [], shown: [])
+        let verdict = SuggestionVerifier.verify(
+            raw("Its", "It's"), paragraph: paragraph, paragraphStart: 10, code: [], shown: [])
         #expect(verdict == .shown(.punctuation, NSRange(location: 10, length: 3)))
     }
 
@@ -26,28 +28,47 @@ struct SuggestionVerifierTests {
 
     @Test("An original not in the paragraph, a no op, and an unknown kind are all dropped, per AC-23 and AC-24")
     func basicDrops() {
-        #expect(SuggestionVerifier.verify(raw("It is", "It's"), paragraph: paragraph, paragraphStart: 0, code: [], shown: []) == .dropped(.notAnchored))
-        #expect(SuggestionVerifier.verify(raw("true", "true"), paragraph: paragraph, paragraphStart: 0, code: [], shown: []) == .dropped(.noChange))
-        #expect(SuggestionVerifier.verify(raw("true", "truly", kind: "style"), paragraph: paragraph, paragraphStart: 0, code: [], shown: []) == .dropped(.unknownKind))
+        #expect(
+            SuggestionVerifier.verify(
+                raw("It is", "It's"), paragraph: paragraph, paragraphStart: 0, code: [], shown: [])
+                == .dropped(.notAnchored))
+        #expect(
+            SuggestionVerifier.verify(raw("true", "true"), paragraph: paragraph, paragraphStart: 0, code: [], shown: [])
+                == .dropped(.noChange))
+        #expect(
+            SuggestionVerifier.verify(
+                raw("true", "truly", kind: "style"), paragraph: paragraph, paragraphStart: 0, code: [], shown: [])
+                == .dropped(.unknownKind))
     }
 
     @Test("A second suggestion overlapping one already shown is dropped, so only one underline appears, per AC-28")
     func overlapIsDropped() {
-        let first = SuggestionVerifier.verify(raw("use to go", "used to go", kind: "grammar"), paragraph: paragraph, paragraphStart: 0, code: [], shown: [])
-        guard case .shown(_, let range) = first else { Issue.record("first should show"); return }
-        let second = SuggestionVerifier.verify(raw("use to", "used to", kind: "grammar"), paragraph: paragraph, paragraphStart: 0, code: [], shown: [range])
+        let first = SuggestionVerifier.verify(
+            raw("use to go", "used to go", kind: "grammar"), paragraph: paragraph, paragraphStart: 0, code: [],
+            shown: [])
+        guard case .shown(_, let range) = first else {
+            Issue.record("first should show")
+            return
+        }
+        let second = SuggestionVerifier.verify(
+            raw("use to", "used to", kind: "grammar"), paragraph: paragraph, paragraphStart: 0, code: [], shown: [range]
+        )
         #expect(second == .dropped(.overlaps))
     }
 
     @Test("An anchor landing on code is dropped")
     func codeIsOffLimits() {
-        let verdict = SuggestionVerifier.verify(raw("Its", "It's"), paragraph: paragraph, paragraphStart: 0, code: [NSRange(location: 0, length: 5)], shown: [])
+        let verdict = SuggestionVerifier.verify(
+            raw("Its", "It's"), paragraph: paragraph, paragraphStart: 0, code: [NSRange(location: 0, length: 5)],
+            shown: [])
         #expect(verdict == .dropped(.touchesCode))
     }
 
     @Test("A response in any other shape is dropped whole, per AC-22")
     func schemaIsEnforced() {
-        #expect(SuggestionVerifier.parse(#"{"suggestions":[{"kind":"grammar","original":"a","replacement":"b","reason":"c"}]}"#)?.count == 1)
+        #expect(
+            SuggestionVerifier.parse(
+                #"{"suggestions":[{"kind":"grammar","original":"a","replacement":"b","reason":"c"}]}"#)?.count == 1)
         #expect(SuggestionVerifier.parse(#"{"suggestions":[{"kind":"grammar","original":"a"}]}"#) == nil)
         #expect(SuggestionVerifier.parse("Sure! Here are some fixes") == nil)
     }
@@ -55,7 +76,8 @@ struct SuggestionVerifierTests {
     @Test("An emoji before the anchor does not move it, because offsets are UTF-16 throughout")
     func emojiKeepsAnchor() {
         let text = "🎉 Its fine."
-        let verdict = SuggestionVerifier.verify(raw("Its", "It's"), paragraph: text, paragraphStart: 0, code: [], shown: [])
+        let verdict = SuggestionVerifier.verify(
+            raw("Its", "It's"), paragraph: text, paragraphStart: 0, code: [], shown: [])
         #expect(verdict == .shown(.punctuation, (text as NSString).range(of: "Its")))
     }
 }
@@ -69,16 +91,20 @@ struct SuggestionContextTests {
 
         #expect(paragraphs.map(\.isCode) == [false, true, false])
         #expect(paragraphs[0].masked == "Call [code] now.")
-        let message = SuggestionContext.message(title: "T", subtitle: "S", paragraphs: paragraphs, target: 2, budget: 10_000)
+        let message = SuggestionContext.message(
+            title: "T", subtitle: "S", paragraphs: paragraphs, target: 2, budget: 10_000)
         #expect(!message.contains("secret()"))
         #expect(!message.contains("let key"))
     }
 
-    @Test("A post too long for the window keeps the title and the whole target, and drops the furthest context first, per AC-21")
+    @Test(
+        "A post too long for the window keeps the title and the whole target, and drops the furthest context first, per AC-21"
+    )
     func overflowTrimsFromTheFarEnd() {
         let body = (0..<40).map { "Paragraph \($0) " + String(repeating: "word ", count: 40) }.joined(separator: "\n\n")
         let paragraphs = SuggestionContext.paragraphs(of: body)
-        let message = SuggestionContext.message(title: "My Title", subtitle: "My Sub", paragraphs: paragraphs, target: 39, budget: 2000)
+        let message = SuggestionContext.message(
+            title: "My Title", subtitle: "My Sub", paragraphs: paragraphs, target: 39, budget: 2000)
 
         #expect(message.contains("Title: My Title"))
         #expect(message.contains("<target>\n\(paragraphs[39].masked)\n</target>"))
@@ -106,15 +132,22 @@ private nonisolated final class FakeOllama: @unchecked Sendable {
             fetch: { [reachable] request in
                 guard reachable else { throw URLError(.cannotConnectToHost) }
                 let body = #"{"models":[{"name":"llama3.2:3b"}]}"#
-                return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+                return (
+                    Data(body.utf8),
+                    HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+                )
             },
             chatFetch: { [self] request in
                 lock.withLock { calls += 1 }
                 let sent = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
-                let target = sent.components(separatedBy: "<target>\\n").last?.components(separatedBy: "\\n</target>").first ?? ""
+                let target =
+                    sent.components(separatedBy: "<target>\\n").last?.components(separatedBy: "\\n</target>").first
+                    ?? ""
                 let content = try await answer(target)
                 let reply = try JSONEncoder().encode(["message": ["role": "assistant", "content": content]])
-                return (reply, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+                return (
+                    reply, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+                )
             })
     }
 }
@@ -128,7 +161,10 @@ private nonisolated func suggestions(_ items: [(String, String, String)]) -> Str
 private func waitFor(_ condition: () -> Bool) async throws {
     let deadline = ContinuousClock.now + .seconds(10)
     while !condition() {
-        guard ContinuousClock.now < deadline else { Issue.record("Timed out"); return }
+        guard ContinuousClock.now < deadline else {
+            Issue.record("Timed out")
+            return
+        }
         try await Task.sleep(for: .milliseconds(10))
     }
 }
@@ -137,7 +173,8 @@ private func waitFor(_ condition: () -> Bool) async throws {
 @MainActor
 struct SuggestionEngineTests {
     private func engine(body: String, fake: FakeOllama, store: SuggestionStore? = nil)
-        throws -> (SuggestionEngine, DocumentSession, SuggestionStore) {
+        throws -> (SuggestionEngine, DocumentSession, SuggestionStore)
+    {
         let database = try MyCMS.Database.inMemory()
         let documents = DocumentStore(database: database)
         let session = DocumentSession(document: try documents.create(collection: .blog), store: documents)
@@ -189,7 +226,9 @@ struct SuggestionEngineTests {
         try await Task.sleep(for: .milliseconds(200))
         #expect(fake.chatCalls == 1)
 
-        let again = SuggestionEngine(session: session, store: store, settings: SettingsStore(database: try MyCMS.Database.inMemory()), makeClient: fake.client)
+        let again = SuggestionEngine(
+            session: session, store: store, settings: SettingsStore(database: try MyCMS.Database.inMemory()),
+            makeClient: fake.client)
         again.scheduleCheck(after: .zero)
         try await Task.sleep(for: .milliseconds(200))
         #expect(fake.chatCalls == 1)
@@ -203,7 +242,9 @@ struct SuggestionEngineTests {
         try await waitFor { !engine.suggestions.isEmpty }
         engine.dismiss(try #require(engine.suggestions.first))
 
-        let relaunched = SuggestionEngine(session: session, store: store, settings: SettingsStore(database: try MyCMS.Database.inMemory()), makeClient: fake.client)
+        let relaunched = SuggestionEngine(
+            session: session, store: store, settings: SettingsStore(database: try MyCMS.Database.inMemory()),
+            makeClient: fake.client)
         relaunched.scheduleCheck(after: .zero)
         try await Task.sleep(for: .milliseconds(300))
         #expect(relaunched.suggestions.isEmpty)
@@ -236,7 +277,12 @@ struct SuggestionEngineTests {
 
     @Test("Accept all punctuation fixes three in one paragraph, the last one landing correctly, per AC-30")
     func acceptAllPunctuation() async throws {
-        let fake = FakeOllama { _ in suggestions([("punctuation", "Its", "It's"), ("punctuation", "dont", "don't"), ("punctuation", "people.Still", "people. Still")]) }
+        let fake = FakeOllama { _ in
+            suggestions([
+                ("punctuation", "Its", "It's"), ("punctuation", "dont", "don't"),
+                ("punctuation", "people.Still", "people. Still"),
+            ])
+        }
         let (engine, session, _) = try engine(body: "Its true I dont know people.Still here.\n", fake: fake)
         engine.scheduleCheck(after: .zero)
         try await waitFor { engine.suggestions.count == 3 }
@@ -248,7 +294,10 @@ struct SuggestionEngineTests {
 
     @Test("A server that never answers times out, frees the slot, and reports rather than hangs, per AC-68")
     func timeoutFreesTheSlot() async throws {
-        let fake = FakeOllama { _ in try await Task.sleep(for: .seconds(30)); return "" }
+        let fake = FakeOllama { _ in
+            try await Task.sleep(for: .seconds(30))
+            return ""
+        }
         let (engine, _, _) = try engine(body: "Words.\n", fake: fake)
         engine.requestTimeout = 0.3
         engine.scheduleCheck(after: .zero)

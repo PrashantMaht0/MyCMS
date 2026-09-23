@@ -1,7 +1,11 @@
 import Foundation
 import GRDB
 
-// One post or project page. The id is written into frontmatter as cmsId.
+/// One post or project page, and the row every other table hangs off.
+///
+/// The id is written into the published file's frontmatter as `cmsId`, which is how an imported
+/// file is matched back to its document. `slug` is the address it publishes at; `publishedSlug` is
+/// the address currently live, kept even after unpublishing so a republish lands in the same place.
 nonisolated struct Document: DatabaseRecord, Identifiable, Equatable {
     static let databaseTableName = "documents"
 
@@ -126,8 +130,13 @@ nonisolated struct Document: DatabaseRecord, Identifiable, Equatable {
     }
 }
 
-// Everything in frontmatter that the app never filters or sorts on, so it stays in one JSON column.
+/// Everything in frontmatter that the app never filters or sorts on, kept in one JSON column.
+///
+/// Project only fields (role, timeline, status, tech, the URLs, order) live here beside `draft` and
+/// `aiAssisted`. The writer drops the project fields for a blog post, so a stray value from an
+/// import never reaches a published file.
 nonisolated struct DocumentFields: Codable, Equatable, Sendable {
+    // The three values the site's project schema accepts.
     enum ProjectStatus: String, Codable, CaseIterable, Sendable {
         case active
         case complete
@@ -175,7 +184,7 @@ nonisolated struct DocumentFields: Codable, Equatable, Sendable {
     }
 }
 
-// The narrow row the library list reads, so no body is ever loaded to draw a list.
+/// The narrow row the library list reads, so no body is ever loaded to draw a list.
 nonisolated struct DocumentListItem: DatabaseRow, Identifiable, Equatable {
     var id: UUID
     var collection: Document.Collection
@@ -195,8 +204,7 @@ nonisolated struct DocumentListItem: DatabaseRow, Identifiable, Equatable {
         """
 }
 
-
-// The narrow row the repo scan reads, so no body is ever loaded to compare a hash.
+/// The narrow row the repo scan reads, so no body is ever loaded to compare a hash.
 nonisolated struct DocumentFileRef: DatabaseRow, Identifiable, Equatable, Sendable {
     var id: UUID
     var collection: Document.Collection

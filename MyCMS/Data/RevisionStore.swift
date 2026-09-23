@@ -1,8 +1,11 @@
 import Foundation
 import GRDB
 
-// Spec 0005 D. Snapshots of a document, kept until the document is deleted, so a publish, an
-// accepted AI rewrite and an ordinary afternoon of editing can all be taken back.
+/// Snapshots of a document, so a publish, an accepted AI rewrite and an ordinary afternoon of
+/// editing can all be taken back.
+///
+/// `snapshot` keeps at most one autosave per ten minutes, and always keeps a publish or manual
+/// snapshot. Rows are removed with their document by the foreign key, never by hand.
 nonisolated struct RevisionStore: Sendable {
     // Notes 5.3's four reasons. Only autosave is ever rate limited.
     enum Reason: String, Sendable, CaseIterable {
@@ -35,12 +38,14 @@ nonisolated struct RevisionStore: Sendable {
     func snapshot(_ document: Document, body: String, reason: Reason, at date: Date = Date()) throws -> Int64? {
         try database.write { db in
             if reason == .autosave,
-                let newest = try Revision
+                let newest =
+                    try Revision
                     .filter(Column("document_id") == document.id.uuidString)
                     .filter(Column("reason") == Reason.autosave.rawValue)
                     .order(Column("created_at").desc)
                     .fetchOne(db),
-                date.timeIntervalSince(newest.createdAt) < Self.autosaveInterval {
+                date.timeIntervalSince(newest.createdAt) < Self.autosaveInterval
+            {
                 return nil
             }
 

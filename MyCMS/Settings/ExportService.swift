@@ -15,7 +15,8 @@ nonisolated struct ExportService: Sendable {
             let text = try FrontmatterWriter.serialize(
                 document, publishDate: document.publishDate ?? document.createdAt, updatedDate: document.updatedDate)
             do {
-                try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try FileManager.default.createDirectory(
+                    at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try Data(text.utf8).write(to: target, options: .atomic)
             } catch {
                 throw PublishError.writeFailed(path: name, underlying: error)

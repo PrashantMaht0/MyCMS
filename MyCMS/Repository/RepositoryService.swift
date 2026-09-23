@@ -1,8 +1,13 @@
 import Foundation
 import OSLog
 
-// Everything the app knows about the portfolio repo: whether a folder qualifies, whether git can
-// push to it, and what was recorded last time. Feature 7 publishes through this, not around it.
+/// Everything the app knows about your portfolio repository: validating one, recording it, and
+/// proving a push would work.
+///
+/// `validate` accepts a folder only when it is a git repository on `main`, with a remote and both
+/// content folders present, and throws a `RepositoryError` naming the first thing that failed.
+/// `record` saves it, `revalidate` re-checks it at launch, and a failure there sends the app to the
+/// repair screen instead of the library.
 nonisolated struct RepositoryService: Sendable {
     // The two folders the site's content lives in. A repo without them is the wrong repo.
     static let contentFolders = ["src/content/blog", "src/content/projects"]
@@ -115,7 +120,8 @@ nonisolated struct RepositoryService: Sendable {
 
     // git version 2.39.5 (Apple Git-154) becomes Git 2.39.5, which is what the screen has room for.
     static func displayVersion(_ raw: String) -> String {
-        let number = raw
+        let number =
+            raw
             .replacingOccurrences(of: "git version ", with: "")
             .split(separator: " ")
             .first
@@ -150,7 +156,8 @@ nonisolated struct RepositoryService: Sendable {
             SettingsKey.repoWasDirtyAtSetup: repository.wasDirtyAtSetup ? "true" : "false",
         ])
         Loggers.repository.info(
-            "Recorded repository on branch \(repository.branch, privacy: .public) at \(repository.path, privacy: .private)")
+            "Recorded repository on branch \(repository.branch, privacy: .public) at \(repository.path, privacy: .private)"
+        )
     }
 
     func setupState() throws -> SetupState {

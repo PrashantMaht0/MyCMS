@@ -6,14 +6,18 @@ import OSLog
 // change, shared by the Settings window, the sidebar route and the open editor alike.
 @Observable final class SettingsModel {
     // Editor
-    var fontSize: Double = Double(Broadsheet.TypeScale.body) { didSet { write(SettingsKey.editorFontSize, String(fontSize)) } }
+    var fontSize: Double = Double(Broadsheet.TypeScale.body) {
+        didSet { write(SettingsKey.editorFontSize, String(fontSize)) }
+    }
     var showMarkers = true { didSet { write(SettingsKey.editorShowMarkers, showMarkers ? "true" : "false") } }
 
     // AI
     var ollamaURL = OllamaClient.defaultBaseURL.absoluteString { didSet { write(SettingsKey.ollamaURL, ollamaURL) } }
     var model = OllamaClient.defaultModel { didSet { write(SettingsKey.ollamaModel, model) } }
     var grammarEnabled = true { didSet { write(SettingsKey.aiGrammarEnabled, grammarEnabled ? "true" : "false") } }
-    var punctuationEnabled = true { didSet { write(SettingsKey.aiPunctuationEnabled, punctuationEnabled ? "true" : "false") } }
+    var punctuationEnabled = true {
+        didSet { write(SettingsKey.aiPunctuationEnabled, punctuationEnabled ? "true" : "false") }
+    }
     var rewritesEnabled = true { didSet { write(SettingsKey.aiRewritesEnabled, rewritesEnabled ? "true" : "false") } }
     var checkDelay = 1.5 { didSet { write(SettingsKey.aiCheckDelaySeconds, String(checkDelay)) } }
 
@@ -34,7 +38,10 @@ import OSLog
     // Set while load() fills the properties, so reading a row never writes it straight back.
     @ObservationIgnored private var isLoading = false
 
-    init(settings: SettingsStore, repository: RepositoryService, setup: SetupModel, database: Database, documents: DocumentStore) {
+    init(
+        settings: SettingsStore, repository: RepositoryService, setup: SetupModel, database: Database,
+        documents: DocumentStore
+    ) {
         self.settings = settings
         self.repositoryService = repository
         self.setup = setup
@@ -70,7 +77,8 @@ import OSLog
         do {
             try settings.set(value, forKey: key)
         } catch {
-            Loggers.data.error("Could not save \(key, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            Loggers.data.error(
+                "Could not save \(key, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -113,10 +121,6 @@ import OSLog
 
     func revealDatabaseFolder() {
         NSWorkspace.shared.activateFileViewerSelecting([database.url])
-    }
-
-    var lastExportFolder: URL? {
-        ((try? settings.string(forKey: SettingsKey.exportLastFolder)) ?? nil).map { URL(fileURLWithPath: $0) }
     }
 
     // AC-59. Every document, draft or published, written the way a publish would write it.

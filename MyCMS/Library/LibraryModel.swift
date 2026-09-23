@@ -2,9 +2,13 @@ import Foundation
 import GRDB
 import SwiftUI
 
-// The library list and everything that narrows it.
-// Observes unfiltered on purpose: a narrowed observation could not count the other filters.
+/// The library list and everything that narrows it: collection, filter, search and selection.
+///
+/// It observes unfiltered on purpose, because a narrowed observation could not count the other
+/// filters. "Changed outside CMS" is not a stored state, it is what the last repo scan found, so
+/// every filter is answered here rather than by a column.
 @MainActor @Observable final class LibraryModel {
+    // The four scopes in the sidebar. Changed outside is derived from the scan, not a column.
     enum Filter: String, CaseIterable, Identifiable {
         case all, drafts, published, changedOutside
         var id: String { rawValue }
@@ -124,6 +128,17 @@ import SwiftUI
         } catch {
             errorText = error.localizedDescription
             return nil
+        }
+    }
+
+    // Spec 0006 A, AC-6. The row cascades to its children; its stored pictures go with it.
+    func delete(_ id: UUID, assets: AssetStore) {
+        do {
+            try store.delete(id: id)
+            assets.removeFolder(for: id)
+            if selectedID == id { selectedID = nil }
+        } catch {
+            errorText = error.localizedDescription
         }
     }
 

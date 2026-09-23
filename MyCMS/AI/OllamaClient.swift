@@ -27,11 +27,18 @@ nonisolated enum AIError: LocalizedError {
     }
 }
 
-// Talks to Ollama on localhost. Feature 8 grows this into the real client.
+/// The whole conversation with Ollama on this machine, over plain HTTP at `127.0.0.1:11434`.
+///
+/// Nothing leaves the laptop. `version` and `models` are the availability checks the health screen
+/// and the suggestion panel read; `chat` sends one prompt and returns the reply text, asking for
+/// JSON when a schema is given. Every call has a timeout and throws `AIError`, which carries the
+/// message shown in the panel (not running, model missing, timed out, bad reply).
 nonisolated struct OllamaClient: Sendable {
     typealias Fetch = @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
-    static let defaultBaseURL = URL(string: "http://localhost:11434")!
+    // 127.0.0.1, not localhost: that name resolves to ::1 first, which Ollama refuses, and every
+    // request logged the refusal before falling back.
+    static let defaultBaseURL = URL(string: "http://127.0.0.1:11434")!
 
     let baseURL: URL
     private let fetch: Fetch
@@ -145,9 +152,10 @@ nonisolated struct OllamaClient: Sendable {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = timeout
-        request.httpBody = try JSONEncoder().encode(Body(
-            model: model, messages: messages, format: format,
-            options: Options(temperature: temperature), keep_alive: "10m", stream: false))
+        request.httpBody = try JSONEncoder().encode(
+            Body(
+                model: model, messages: messages, format: format,
+                options: Options(temperature: temperature), keep_alive: "10m", stream: false))
         let sealed = request
 
         let data: Data
@@ -211,8 +219,12 @@ nonisolated struct OllamaClient: Sendable {
 
 // Any JSON value, which is how a schema written as JSON text travels in `format` untouched.
 nonisolated indirect enum JSONValue: Codable, Sendable, Equatable {
-    case string(String), number(Double), bool(Bool), null
-    case array([JSONValue]), object([String: JSONValue])
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case null
+    case array([JSONValue])
+    case object([String: JSONValue])
 
     init(parsing text: String) throws {
         self = try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))
@@ -220,12 +232,19 @@ nonisolated indirect enum JSONValue: Codable, Sendable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if container.decodeNil() { self = .null }
-        else if let value = try? container.decode(Bool.self) { self = .bool(value) }
-        else if let value = try? container.decode(Double.self) { self = .number(value) }
-        else if let value = try? container.decode(String.self) { self = .string(value) }
-        else if let value = try? container.decode([JSONValue].self) { self = .array(value) }
-        else { self = .object(try container.decode([String: JSONValue].self)) }
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode([JSONValue].self) {
+            self = .array(value)
+        } else {
+            self = .object(try container.decode([String: JSONValue].self))
+        }
     }
 
     func encode(to encoder: Encoder) throws {
